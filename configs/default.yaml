@@ -14,6 +14,7 @@ attribution:
 company:
   name: "DNV Energy Systems Germany GmbH"
   logo_path: "../assets/logo.png"   # relative to this config file's directory
+  logo_scale: 1.0   # multiplier on the logo's base footer size, e.g. 1.5 = 50% bigger
 
 map:
   crs: "EPSG:4326"              # coordinate reference system for plotting + basemap

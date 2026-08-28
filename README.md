@@ -175,6 +175,11 @@ changes needed:
   right now (only `company.logo_path` shows, as the logo image). Add a line
   for it in `elements.add_footer`'s `lines` list if you want the company name
   spelled out as well as shown via the logo.
+- **`company.logo_scale`** (default `1.0`) — multiplier on the logo's size in
+  the footer. The logo anchors to the bottom-right corner of its column and
+  grows/shrinks from that corner, so scaling it up never shifts the
+  date/author/copyright text above it; it's clamped so it can't outgrow the
+  column itself. E.g. `logo_scale: 1.5` for a 50% bigger logo.
 
 ## Basemap notes
 

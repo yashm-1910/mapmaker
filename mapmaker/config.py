@@ -24,6 +24,7 @@ DEFAULTS: dict[str, Any] = {
     "company": {
         "name": "",
         "logo_path": "",
+        "logo_scale": 1.0,  # multiplier on the logo's base footer size, anchored bottom-right
     },
     "map": {
         "crs": "EPSG:4326",

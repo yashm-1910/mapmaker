@@ -402,12 +402,19 @@ def add_footer(
     ax_meta.set_xlim(0, 1)
     ax_meta.set_ylim(0, 1)
 
-    logo_path = config_mod.resolve_path(cfg, cfg.get("company", {}).get("logo_path"))
+    company_cfg = cfg.get("company", {})
+    logo_path = config_mod.resolve_path(cfg, company_cfg.get("logo_path"))
     if logo_path and Path(logo_path).exists():
         img = plt.imread(str(logo_path))
         # Logo anchors to the bottom-right corner rather than spanning/centering
         # the full column height, so it doesn't compete with the top-aligned text.
-        logo_ax = ax_meta.inset_axes([0.74, 0.0, 0.26, 0.45])
+        # `company.logo_scale` grows/shrinks it from that corner (base size at 1.0),
+        # clamped so it can never exceed the meta column it lives in.
+        base_w, base_h = 0.26, 0.45
+        scale = company_cfg.get("logo_scale", 1.0)
+        logo_w = min(base_w * scale, 1.0)
+        logo_h = min(base_h * scale, 1.0)
+        logo_ax = ax_meta.inset_axes([1.0 - logo_w, 0.0, logo_w, logo_h])
         logo_ax.imshow(img)
         logo_ax.axis("off")
 
