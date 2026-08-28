@@ -1,0 +1,25 @@
+base: default.yaml
+map_type: grid_cells
+
+export:
+  filename: "era5_merra2_grid_cells.png"
+
+map:
+  padding_fraction: 0.05
+
+inset_map:
+  zoom_out_factor: 4
+  size: 0.22
+
+north_arrow:
+  size: 0.035
+
+style:
+  marker: "D"            # any matplotlib marker code, e.g. "D" diamond, "o" circle, "^" triangle
+  dataset_colors:
+    ERA5: "#3182bd"
+    MERRA2: "#e6550d"
+  marker_size: 14
+
+graticule:
+  n_ticks: 6

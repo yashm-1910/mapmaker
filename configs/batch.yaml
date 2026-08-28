@@ -1,0 +1,31 @@
+# Batch run: each job loads a config file and applies its own overrides on top.
+jobs:
+  - name: "Wind farm overview"
+    config: wind_farms.yaml
+
+  - name: "Turbines - Nordsee Alpha"
+    config: turbines.yaml
+    overrides:
+      data:
+        selected_farm: "Nordsee Alpha"
+      export:
+        filename: "turbines_nordsee_alpha.png"
+
+  - name: "Turbines - Gemini Reef"
+    config: turbines.yaml
+    overrides:
+      data:
+        selected_farm: "Gemini Reef"
+      export:
+        filename: "turbines_gemini_reef.png"
+
+  - name: "Turbines - Borssele Wind"
+    config: turbines.yaml
+    overrides:
+      data:
+        selected_farm: "Borssele Wind"
+      export:
+        filename: "turbines_borssele_wind.png"
+
+  - name: "ERA5 vs MERRA2 grid"
+    config: grid_cells.yaml

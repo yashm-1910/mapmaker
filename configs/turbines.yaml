@@ -1,0 +1,29 @@
+base: default.yaml
+map_type: turbines
+
+data:
+  selected_farm: "Nordsee Alpha"
+
+export:
+  filename: "turbines_nordsee_alpha.png"
+
+# A turbine layout fills most of its bounding box (no natural "empty corner" the
+# way scattered wind farms have), so give it extra breathing room on all sides
+# and a smaller inset -- otherwise the inset would sit on top of real turbines.
+map:
+  padding_fraction: 0.4
+
+inset_map:
+  zoom_out_factor: 40   # turbine-scale maps need a much larger inset zoom-out
+  size: 0.16
+
+style:
+  marker: "o"            # any matplotlib marker code, e.g. "o" circle, "D" diamond, "^" triangle
+  color: "#2166ac"
+  marker_size: 55
+  legend_label: "Turbine"
+  label_points: true
+
+graticule:
+  n_ticks: 4
+  format: dms
