@@ -23,3 +23,12 @@ style:
 
 graticule:
   n_ticks: 6
+
+# Optional: the wind farm this ERA5/MERRA2 comparison is centered on, shown as a single
+# circle point with its name. Coordinates come from here (config), not from
+# grid_cells.xlsx, since it's one reference point rather than part of the grid.
+reference_point:
+  show: true
+  name: "Nordsee Alpha"
+  lon: 6.35
+  lat: 54.65

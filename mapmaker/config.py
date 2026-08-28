@@ -83,6 +83,20 @@ DEFAULTS: dict[str, Any] = {
         "bbox_linewidth": 2.2,
         "min_bbox_frac": 0.05,  # ROI box is floored to this fraction of the inset's width/height
     },
+    # Optional single reference point (e.g. the wind farm a grid_cells map's ERA5/MERRA2
+    # comparison is centered on), sourced from config -- not from the grid data file,
+    # since it's one point rather than part of the reanalysis grid. Only used by
+    # map_type: grid_cells; ignored otherwise. See render.py::build_grid_map.
+    "reference_point": {
+        "show": False,
+        "name": "",
+        "lon": None,
+        "lat": None,
+        "marker": "o",
+        "color": "#d62728",
+        "size": 70,
+        "label_fontsize": 9,
+    },
     "footer": {
         "show": True,
         "height_fraction": 0.09,  # keep the footer band close to the bottom border

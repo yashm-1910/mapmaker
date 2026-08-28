@@ -59,8 +59,10 @@ ignored unless it matches one of the **optional** columns below.
 - `data/turbines.xlsx` — required: `turbine_id, lon, lat`, plus `farm_name` if you filter
   by `data.selected_farm`. Other columns (hub height, rotor diameter, capacity, ...) are
   fine to include for your own records but nothing currently renders them.
-- `data/grid_cells.xlsx` — required: `dataset, cell_id, lon_min, lat_min, lon_max, lat_max,
-  center_lon, center_lat`.
+- `data/grid_cells.xlsx` — required: `dataset, cell_id, lon, lat` (one row per grid cell
+  center; cells render as plain diamond points, not filled polygons, so no cell-boundary
+  columns are needed). The wind farm a grid map is centered on is *not* read from this
+  file — see `reference_point` below.
 
 See `mapmaker/data_io.py` for the exact column contract each `read_*` function enforces.
 
@@ -135,6 +137,20 @@ space — set them explicitly per config/job when you want one.
 - **Graticule** draws small `+` cross ticks at each grid intersection (not
   full lines across the map) with coordinate labels mirrored on all four
   sides of the frame, matching a classic QGIS print-layout grid.
+- **`reference_point` (grid_cells maps only)** marks the wind farm an ERA5/MERRA2
+  comparison is centered on: a single named circle point, e.g.
+  ```yaml
+  reference_point:
+    show: true
+    name: "Nordsee Alpha"
+    lon: 6.35
+    lat: 54.65
+  ```
+  Its coordinates come from the config, not `grid_cells.xlsx` (it isn't part of the
+  reanalysis grid, so it doesn't belong in that data file). `show: false` (the default)
+  omits it entirely; `marker`, `color`, `size`, `label_fontsize` are all overridable. It's
+  included in the map's extent calculation, so the frame adjusts to keep it visible even
+  if it sits near the edge of the grid.
 
 ## Footer metadata
 

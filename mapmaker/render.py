@@ -6,11 +6,13 @@ import warnings
 from pathlib import Path
 
 import contextily as cx
+import geopandas as gpd
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
+from shapely.geometry import Point
 
 from . import config as config_mod
 from . import data_io
@@ -367,13 +369,36 @@ def build_grid_map(cfg: dict) -> Path:
     for dataset in sorted(gdf["dataset"].unique()):
         sub = gdf[gdf["dataset"] == dataset]
         color = dataset_colors.get(dataset, "#555555")
-        ax.scatter(sub["center_lon"], sub["center_lat"], s=marker_size, marker=marker, color=color,
+        ax.scatter(sub.geometry.x, sub.geometry.y, s=marker_size, marker=marker, color=color,
                    edgecolor="black", linewidth=0.25, zorder=6)
         handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,
                                markeredgecolor="black", markersize=7, label=f"{dataset} grid"))
 
+    # Optional single reference point (e.g. the wind farm this grid comparison is
+    # centered on) -- sourced from `cfg["reference_point"]` rather than the grid data
+    # file, since it's one point, not part of the reanalysis grid itself. Folded into
+    # the extent so the map frame accounts for it even if it sits near a grid edge.
+    ref = cfg.get("reference_point", {})
+    extent_gdf = gdf
+    if ref.get("show", False) and ref.get("lon") is not None and ref.get("lat") is not None:
+        ref_point = gpd.GeoSeries([Point(ref["lon"], ref["lat"])], crs="EPSG:4326").to_crs(cfg["map"]["crs"])
+        rx, ry = ref_point.iloc[0].x, ref_point.iloc[0].y
+        ref_marker = ref.get("marker", "o")
+        ref_color = ref.get("color", "#d62728")
+        ax.scatter([rx], [ry], s=ref.get("size", 70), marker=ref_marker, color=ref_color,
+                   edgecolor="black", linewidth=0.7, zorder=8)
+        if ref.get("name"):
+            ax.annotate(
+                str(ref["name"]), (rx, ry), textcoords="offset points", xytext=(6, 4), ha="left",
+                fontsize=ref.get("label_fontsize", 9), color="0.05", zorder=9,
+                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
+            )
+        handles.append(Line2D([0], [0], marker=ref_marker, color="w", markerfacecolor=ref_color,
+                               markeredgecolor="black", markersize=8, label=ref.get("name") or "Reference point"))
+        extent_gdf = gpd.GeoDataFrame(geometry=pd.concat([gdf.geometry, ref_point], ignore_index=True), crs=gdf.crs)
+
     # Per-dataset cell counts can be surfaced via extra_footer_lines (see
     # _finalize / elements.add_footer) or cfg["notes"] -- left out of the
     # rendered footer for now per current design; see README.md.
-    return _finalize(fig, ax, cfg, gdf, footer_gs, target_aspect,
+    return _finalize(fig, ax, cfg, extent_gdf, footer_gs, target_aspect,
                       legend_handles=handles, legend_title=cfg.get("legend", {}).get("title", "Legend"))

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
-from shapely.geometry import Point, box
+from shapely.geometry import Point
 
 
 def read_wind_farms(path: str | Path) -> gpd.GeoDataFrame:
@@ -42,11 +42,12 @@ def read_turbines(path: str | Path, farm_name: str | None = None) -> gpd.GeoData
 
 
 def read_grid_cells(path: str | Path, datasets: list[str] | None = None) -> gpd.GeoDataFrame:
-    """Load reanalysis grid cells from an Excel workbook, optionally filtered by dataset.
+    """Load reanalysis grid cell center points from an Excel workbook, optionally filtered by dataset.
 
-    Expected columns: dataset, cell_id, lon_min, lat_min, lon_max, lat_max, center_lon, center_lat.
-    Returns a GeoDataFrame of rectangular cell-boundary Polygon geometries in EPSG:4326
-    (the `center_lon`/`center_lat` columns are used separately for point-marker rendering).
+    Required columns: dataset, cell_id, lon, lat. Cells are rendered as plain diamond
+    points (no filled grid polygons), so only the cell center coordinate is needed --
+    see render.py::build_grid_map.
+    Returns a GeoDataFrame of Point geometries in EPSG:4326.
 
     Raises ValueError if `datasets` is given but matches no rows.
     """
@@ -55,7 +56,5 @@ def read_grid_cells(path: str | Path, datasets: list[str] | None = None) -> gpd.
         df = df[df["dataset"].isin(datasets)].reset_index(drop=True)
     if df.empty:
         raise ValueError(f"No grid cells found for datasets={datasets!r} in {path}")
-    geometry = [
-        box(r.lon_min, r.lat_min, r.lon_max, r.lat_max) for r in df.itertuples(index=False)
-    ]
+    geometry = [Point(xy) for xy in zip(df["lon"], df["lat"])]
     return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
