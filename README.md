@@ -234,6 +234,7 @@ simply ignored).
 | `style.size_scale` | `0.5` | Multiplier applied to `size_field`'s value before adding it to `base_marker_size`. |
 | `style.label_points` | `true` | Draw each farm's `name` next to its point. |
 | `style.label_fontsize` | `9` | Point label font size. |
+| `style.declutter_labels` | `true` | Reorient a label around its point (instead of a fixed spot) if needed to avoid overlapping another label — never dropped (see Layout notes). Farms are placed in `size_field` order (biggest first) so, when it's crowded, the more prominent farms get first pick of the tidiest spot. |
 | `style.legend_label` | `Wind Farm` | Legend entry label used when there's no `status` column. |
 
 **`turbines`:**
@@ -245,7 +246,8 @@ simply ignored).
 | `style.marker_size` | `55` | Marker size. |
 | `style.label_points` | `true` | Draw each turbine's `turbine_id` next to its point. |
 | `style.label_fontsize` | `8` | Point label font size. |
-| `style.legend_label` | `Turbine` | Legend entry label. |
+| `style.declutter_labels` | `true` | Same overlap-avoiding reorientation as `wind_farms` above, in `turbine_id` order. |
+| `style.legend_label` | *(the split's `farm_name`, else `Turbine`)* | Legend entry label. An explicit value here always wins; otherwise it defaults to the map's own wind farm name (see Map types) so a split-per-farm turbine map doesn't just say "Turbine" in every legend. |
 
 **`grid_cells`:**
 
@@ -262,6 +264,17 @@ table and the code ever drift.
 
 ## Layout notes
 
+- **Point labels decluttered automatically** (`wind_farms`/`turbines`, `style.declutter_labels`,
+  default `true`): every point still gets a label — none are ever dropped. Instead,
+  `render.py::_place_labels` tries a ring of 8 candidate placements around each point (N/S/E/W
+  and the diagonals), estimating each candidate's on-page bounding box from the map panel's
+  real rendered pixel size (like the scale bar does), and uses the first one that doesn't
+  overlap an already-placed label or the inset map; if every candidate would overlap something,
+  it falls back to whichever candidate overlaps the least. Labels are placed in priority order
+  (wind farms: biggest `size_field` first; turbines: sheet order), so on a crowded map the
+  higher-priority points get first pick of the tidiest spot. Set `style.declutter_labels: false`
+  to always use the single default placement (upper-right of the point) instead, ignoring
+  overlaps entirely.
 - **Outer page border with uniform margins.** A thin rectangle frames the
   whole page (`render.py::_add_page_border`). Margins are defined in *inches*
   (`OUTER_MARGIN_IN`, `SIDE_PAD_IN`, `BOTTOM_PAD_IN`, `TITLE_BAND_IN` at the

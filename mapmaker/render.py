@@ -122,25 +122,111 @@ def _add_title(fig, cfg: dict) -> None:
         fig.text(0.5, 0.935, subtitle, ha="center", fontsize=11, color="0.2")
 
 
-def _label_offset(x: float, y: float, extent: tuple[float, float, float, float], inset_cfg: dict):
-    """Pick an annotation offset that steers point labels away from the inset map's corner."""
-    default = ((6, 4), "left")
-    if not inset_cfg.get("show", True):
-        return default
+# A compass ring of candidate label placements around a point, each (dx, dy) in points
+# (annotation offset units) plus the (ha, va) alignment that anchors the text box to that
+# offset -- tried in this order by `_place_labels`. The first entry matches the old fixed
+# default (label to the upper-right of the point).
+_LABEL_CANDIDATES = [
+    (7, 4, "left", "bottom"),     # E / NE
+    (7, -5, "left", "top"),       # SE
+    (-7, 4, "right", "bottom"),   # W / NW
+    (-7, -5, "right", "top"),     # SW
+    (0, 9, "center", "bottom"),   # N
+    (0, -9, "center", "top"),     # S
+    (9, -1, "left", "center"),    # E, level
+    (-9, -1, "right", "center"),  # W, level
+]
+
+
+def _label_bbox(anchor_x, anchor_y, dx_pt, dy_pt, ha, va, w, h, pt_to_px):
+    """Pixel-space bounding box of a label anchored at (anchor_x, anchor_y) + (dx_pt, dy_pt)
+    (points, converted via `pt_to_px`), aligned per matplotlib's `ha`/`va` semantics."""
+    x = anchor_x + dx_pt * pt_to_px
+    y = anchor_y + dy_pt * pt_to_px
+    x0 = x if ha == "left" else (x - w if ha == "right" else x - w / 2)
+    y0 = y if va == "bottom" else (y - h if va == "top" else y - h / 2)
+    return x0, x0 + w, y0, y0 + h
+
+
+def _boxes_overlap(a, b) -> bool:
+    ax0, ax1, ay0, ay1 = a
+    bx0, bx1, by0, by1 = b
+    return ax0 < bx1 and ax1 > bx0 and ay0 < by1 and ay1 > by0
+
+
+def _place_labels(
+    fig, ax, extent: tuple[float, float, float, float], items: list[tuple[float, float, str]],
+    fontsize: float, inset_cfg: dict, declutter: bool = True,
+) -> None:
+    """Draw a label for every item in `items` (a list of `(x, y, text)`) -- never dropped, only
+    reoriented: for each point, `_LABEL_CANDIDATES` is tried in order and the first placement
+    that overlaps neither an already-placed label nor the inset map is used; if every candidate
+    conflicts, the one with the fewest conflicts wins. `items` order sets priority (earlier
+    points get first pick of the candidate ring, so on a crowded map the more prominent points
+    keep the tidiest placement). Set `declutter=False` to always use the single default
+    placement instead (fast, but labels can visually overlap on dense maps).
+    """
+    if not declutter:
+        for x, y, text in items:
+            if not text:
+                continue
+            dx, dy, ha, va = _LABEL_CANDIDATES[0]
+            ax.annotate(text, (x, y), textcoords="offset points", xytext=(dx, dy), ha=ha, va=va,
+                        fontsize=fontsize, color="0.05", zorder=7,
+                        path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
+        return
+
+    # Estimate each label's pixel-space bounding box from the map panel's actual rendered
+    # size (like the scale bar does) plus a rough average character width -- cheap and good
+    # enough for picking a non-overlapping orientation, without a real text-layout engine.
+    fig.canvas.draw()
+    bbox_px = ax.get_window_extent()
     xmin, xmax, ymin, ymax = extent
-    xf = (x - xmin) / ((xmax - xmin) or 1)
-    yf = (y - ymin) / ((ymax - ymin) or 1)
-    loc = inset_cfg.get("location", "lower left")
-    margin = inset_cfg.get("size", 0.28) + 0.07
-    in_inset = (
-        (loc == "upper right" and xf > 1 - margin and yf > 1 - margin)
-        or (loc == "upper left" and xf < margin and yf > 1 - margin)
-        or (loc == "lower right" and xf > 1 - margin and yf < margin)
-        or (loc == "lower left" and xf < margin and yf < margin)
-    )
-    if in_inset:
-        return (-8, -10), "right"
-    return default
+    px_per_x = bbox_px.width / ((xmax - xmin) or 1e-9)
+    px_per_y = bbox_px.height / ((ymax - ymin) or 1e-9)
+    pt_to_px = fig.dpi / 72.0
+    char_w = fontsize * pt_to_px * 0.58
+    line_h = fontsize * pt_to_px * 1.3
+
+    inset_rect = None
+    if inset_cfg.get("show", True):
+        size = inset_cfg.get("size", 0.28)
+        fx, fy = {
+            "upper right": (1 - size, 1 - size), "upper left": (0.0, 1 - size),
+            "lower right": (1 - size, 0.0), "lower left": (0.0, 0.0),
+        }.get(inset_cfg.get("location", "lower left"), (0.0, 0.0))
+        inset_rect = (
+            bbox_px.x0 + fx * bbox_px.width, bbox_px.x0 + (fx + size) * bbox_px.width,
+            bbox_px.y0 + fy * bbox_px.height, bbox_px.y0 + (fy + size) * bbox_px.height,
+        )
+
+    placed: list[tuple[float, float, float, float]] = []
+    for x, y, text in items:
+        if not text:
+            continue
+        w, h = char_w * len(text), line_h
+        anchor_x = bbox_px.x0 + (x - xmin) * px_per_x
+        anchor_y = bbox_px.y0 + (y - ymin) * px_per_y
+
+        best = None
+        best_conflicts = None
+        for dx, dy, ha, va in _LABEL_CANDIDATES:
+            box = _label_bbox(anchor_x, anchor_y, dx, dy, ha, va, w, h, pt_to_px)
+            conflicts = sum(1 for p in placed if _boxes_overlap(box, p))
+            if inset_rect is not None and _boxes_overlap(box, inset_rect):
+                conflicts += 1
+            if conflicts == 0:
+                best = (dx, dy, ha, va, box)
+                break
+            if best_conflicts is None or conflicts < best_conflicts:
+                best_conflicts = conflicts
+                best = (dx, dy, ha, va, box)
+
+        dx, dy, ha, va, box = best
+        placed.append(box)
+        ax.annotate(text, (x, y), textcoords="offset points", xytext=(dx, dy), ha=ha, va=va,
+                    fontsize=fontsize, color="0.05", zorder=7,
+                    path_effects=[pe.withStroke(linewidth=2.2, foreground="white")])
 
 
 def _compute_extent(gdf, cfg: dict, target_aspect: float = 1.4) -> tuple[float, float, float, float]:
@@ -295,13 +381,12 @@ def build_wind_farm_map(cfg: dict) -> Path:
     if style.get("label_points", True) and "name" in gdf.columns:
         label_fontsize = style.get("label_fontsize", 9)
         extent_for_labels = _compute_extent(gdf, cfg, target_aspect)
-        for _, row in gdf.iterrows():
-            xytext, ha = _label_offset(row.geometry.x, row.geometry.y, extent_for_labels, cfg.get("inset_map", {}))
-            ax.annotate(
-                str(row["name"]), (row.geometry.x, row.geometry.y), textcoords="offset points",
-                xytext=xytext, ha=ha, fontsize=label_fontsize, color="0.05", zorder=7,
-                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
-            )
+        # Label bigger farms first (by size_field, if present) so a crowded map keeps the
+        # more prominent farms labeled when smaller/nearby ones get dropped for overlapping.
+        order = gdf.sort_values(size_field, ascending=False) if size_field in gdf.columns else gdf
+        items = [(row.geometry.x, row.geometry.y, str(row["name"])) for _, row in order.iterrows()]
+        _place_labels(fig, ax, extent_for_labels, items, label_fontsize, cfg.get("inset_map", {}),
+                      declutter=style.get("declutter_labels", True))
 
     # Stats like farm count / total capacity can be surfaced via extra_footer_lines
     # (see _finalize / elements.add_footer) or cfg["notes"] -- left out of the
@@ -349,7 +434,10 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
     marker_color = style.get("color", "#2166ac")
     marker_size = style.get("marker_size", 55)
     marker = style.get("marker", "o")
-    label = style.get("legend_label", "Turbine")
+    # An explicit style.legend_label always wins; otherwise the legend names the wind
+    # farm itself (more useful than a generic "Turbine" once maps are split per farm)
+    # falling back to "Turbine" only if there's no farm_name to use either.
+    label = style.get("legend_label") or farm_name or "Turbine"
 
     ax.scatter(gdf.geometry.x, gdf.geometry.y, s=marker_size, marker=marker, color=marker_color,
                edgecolor="black", linewidth=0.6, zorder=6)
@@ -359,13 +447,9 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
     if style.get("label_points", True) and "turbine_id" in gdf.columns:
         label_fontsize = style.get("label_fontsize", 8)
         extent_for_labels = _compute_extent(gdf, cfg, target_aspect)
-        for _, row in gdf.iterrows():
-            xytext, ha = _label_offset(row.geometry.x, row.geometry.y, extent_for_labels, cfg.get("inset_map", {}))
-            ax.annotate(
-                str(row["turbine_id"]), (row.geometry.x, row.geometry.y), textcoords="offset points",
-                xytext=xytext, ha=ha, fontsize=label_fontsize, color="0.05", zorder=7,
-                path_effects=[pe.withStroke(linewidth=2, foreground="white")],
-            )
+        items = [(row.geometry.x, row.geometry.y, str(row["turbine_id"])) for _, row in gdf.iterrows()]
+        _place_labels(fig, ax, extent_for_labels, items, label_fontsize, cfg.get("inset_map", {}),
+                      declutter=style.get("declutter_labels", True))
 
     # Stats like farm name / turbine count / capacity can be surfaced via
     # extra_footer_lines (see _finalize / elements.add_footer) or cfg["notes"] --
