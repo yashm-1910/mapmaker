@@ -11,7 +11,9 @@ dedicated footer strip below the frame, so nothing ever overlaps the map.
 1. **Wind farm locations** (`map_type: wind_farms`) — point map of farms, colored
    by status, sized by capacity.
 2. **Turbine positions** (`map_type: turbines`) — turbine layout within one farm,
-   uniform-colored points with ID labels.
+   uniform-colored points with ID labels. Leave `data.selected_farm` unset and it
+   renders one map per distinct `farm_name` in the data automatically (see
+   `configs/turbines.yaml`); set `data.selected_farm` to render just one.
 3. **ERA5 / MERRA-2 grid cells** (`map_type: grid_cells`) — plain diamond points
    at each cell center, one color per dataset (no filled grid polygons).
 
@@ -56,8 +58,8 @@ ignored unless it matches one of the **optional** columns below.
 
 - `data/wind_farms.xlsx` — required: `name, lon, lat`. Optional: `capacity_mw` (marker
   sizing, `style.size_field`), `status` (per-category coloring, `style.status_colors`).
-- `data/turbines.xlsx` — required: `turbine_id, lon, lat`, plus `farm_name` if you filter
-  by `data.selected_farm`. Other columns (hub height, rotor diameter, capacity, ...) are
+- `data/turbines.xlsx` — required: `turbine_id, lon, lat`, plus `farm_name` if the file
+  holds more than one farm. Other columns (hub height, rotor diameter, capacity, ...) are
   fine to include for your own records but nothing currently renders them.
 - `data/grid_cells.xlsx` — required: `dataset, cell_id, lon, lat` (one row per grid cell
   center; cells render as plain diamond points, not filled polygons, so no cell-boundary

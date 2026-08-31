@@ -1,11 +1,13 @@
 base: default.yaml
 map_type: turbines
 
-data:
-  selected_farm: "Nordsee Alpha"
-
+# data.selected_farm is left unset on purpose: with turbines.xlsx holding more than one
+# farm_name, mapmaker renders one map per farm automatically (see
+# render.py::build_turbine_map), each filename suffixed with a slug of the farm name
+# (e.g. turbines_nordsee_alpha.png). Set data.selected_farm here (or via a batch job
+# override) to render just one farm instead.
 export:
-  filename: "turbines_nordsee_alpha.png"
+  filename: "turbines.png"
 
 # A turbine layout fills most of its bounding box (no natural "empty corner" the
 # way scattered wind farms have), so give it extra breathing room on all sides

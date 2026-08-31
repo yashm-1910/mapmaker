@@ -40,8 +40,10 @@ def run_batch(batch_path: str | Path) -> list[Path]:
             raise ValueError(f"Job {i} ({cfg_path}): unknown/missing map_type={map_type!r}")
 
         out = builder(cfg)
+        outs = out if isinstance(out, list) else [out]
         label = job.get("name", cfg_path.stem)
-        print(f"[batch {i + 1}/{len(jobs)}] {label} -> {out}")
-        results.append(out)
+        for p in outs:
+            print(f"[batch {i + 1}/{len(jobs)}] {label} -> {p}")
+        results.extend(outs)
 
     return results

@@ -41,7 +41,8 @@ def main() -> None:
         sys.exit(f"Config {args.config} is missing a valid map_type (got {map_type!r}); "
                   f"expected one of {list(BUILDERS)}")
     out = builder(cfg)
-    print(f"Saved: {out}")
+    for p in out if isinstance(out, list) else [out]:
+        print(f"Saved: {p}")
 
 
 if __name__ == "__main__":

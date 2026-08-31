@@ -1,6 +1,7 @@
 """Build the three map types: wind farm locations, turbine positions, ERA5/MERRA2 grid cells."""
 from __future__ import annotations
 
+import copy
 import math
 import warnings
 from pathlib import Path
@@ -311,10 +312,33 @@ def build_wind_farm_map(cfg: dict) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def build_turbine_map(cfg: dict) -> Path:
-    """Render the turbine-positions map (map_type: turbines) and return the saved PNG path."""
+def build_turbine_map(cfg: dict) -> Path | list[Path]:
+    """Render the turbine-positions map (map_type: turbines) and return the saved PNG path.
+
+    If `cfg["data"]["selected_farm"]` is left unset and the data has more than one distinct
+    `farm_name`, no single farm is implied -- instead this renders one map per farm
+    automatically (each a normal recursive call with `selected_farm` pinned and the
+    filename suffixed by a slug of the farm name) and returns a list of paths, in
+    farm-name order, instead of a single Path.
+    """
     path = config_mod.resolve_path(cfg, cfg["data"]["turbines_file"])
     farm_name = cfg["data"].get("selected_farm")
+
+    if farm_name is None:
+        all_farms = pd.read_excel(path).get("farm_name")
+        farm_names = sorted(all_farms.dropna().unique()) if all_farms is not None else []
+        if len(farm_names) > 1:
+            base_filename = cfg["export"].get("filename", "map.png")
+            stem, suffix = Path(base_filename).stem, Path(base_filename).suffix or ".png"
+            paths = []
+            for name in farm_names:
+                farm_cfg = copy.deepcopy(cfg)
+                farm_cfg["data"]["selected_farm"] = name
+                slug = str(name).strip().lower().replace(" ", "_")
+                farm_cfg["export"]["filename"] = f"{stem}_{slug}{suffix}"
+                paths.append(build_turbine_map(farm_cfg))
+            return paths
+
     gdf = data_io.read_turbines(path, farm_name=farm_name).to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
