@@ -9,7 +9,7 @@ import contextily as cx
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
-from pyproj import Geod, Transformer
+from pyproj import CRS, Geod, Transformer
 
 from . import config as config_mod
 
@@ -57,11 +57,57 @@ def _fmt_coord(value: float, kind: str, fmt: str, hemisphere: bool = True) -> st
     return f"{sign}{v:.2f}°{suffix}"
 
 
+def _is_geographic_crs(crs) -> bool:
+    """True for a lon/lat CRS like EPSG:4326; False for a projected CRS like a UTM zone."""
+    try:
+        return CRS.from_user_input(crs).is_geographic
+    except Exception:
+        return "4326" in str(crs).upper()
+
+
+def _add_native_graticule(
+    ax, extent: tuple[float, float, float, float], n_ticks_x: int, n_ticks_y: int,
+    fontsize: float, color: str, frame: bool,
+) -> None:
+    """Grid ticks in the map's own projected coordinate units (e.g. UTM meters/eastings
+    and northings) instead of lon/lat -- a straight, rectilinear easting/northing grid,
+    matching how a projected CRS is conventionally gridded (reprojecting a lon/lat
+    graticule onto a projected CRS would draw meridians as slightly curved lines and
+    label ticks in the wrong unit for that CRS)."""
+    xmin, xmax, ymin, ymax = extent
+    x_step = _nice_step(xmax - xmin, n_ticks_x)
+    y_step = _nice_step(ymax - ymin, n_ticks_y)
+    xs_sorted = _ticks_in_range(xmin, xmax, x_step) or [xmin, xmax]
+    ys_sorted = _ticks_in_range(ymin, ymax, y_step) or [ymin, ymax]
+
+    cross_pts = [(x, y) for x in xs_sorted for y in ys_sorted]
+    if cross_pts:
+        xs, ys = zip(*cross_pts)
+        ax.plot(xs, ys, marker="+", markersize=7, markeredgewidth=0.9, linestyle="None",
+                 color=color, zorder=5)
+
+    ax.set_xticks(xs_sorted)
+    ax.set_xticklabels([f"{x:,.0f} m" for x in xs_sorted], fontsize=fontsize)
+    ax.set_yticks(ys_sorted)
+    ax.set_yticklabels([f"{y:,.0f} m" for y in ys_sorted], fontsize=fontsize, rotation=90, va="center")
+    ax.tick_params(colors="black", labelsize=fontsize, direction="out", length=4,
+                    top=True, labeltop=True, right=True, labelright=True)
+    if frame:
+        for spine in ax.spines.values():
+            spine.set_edgecolor("black")
+            spine.set_linewidth(0.9)
+    else:
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+
 def add_graticule(
     ax,
     crs,
     extent: tuple[float, float, float, float],
     n_ticks: int = 5,
+    n_ticks_x: int | None = None,
+    n_ticks_y: int | None = None,
     fmt: str = "decimal",
     fontsize: float = 8,
     color: str = "0.35",
@@ -72,7 +118,19 @@ def add_graticule(
 ) -> None:
     """Draw small cross ticks at each graticule intersection, with coordinate labels
     mirrored on all four sides of the frame -- matching a classic QGIS print layout
-    grid (rather than full gridlines spanning the whole map)."""
+    grid (rather than full gridlines spanning the whole map). `n_ticks_x`/`n_ticks_y`
+    set the horizontal (longitude) / vertical (latitude) tick density independently;
+    either left `None` falls back to the shared `n_ticks`.
+
+    For a projected `crs` (e.g. a UTM zone), ticks are drawn and labeled in that CRS's
+    own native units (meters) instead of lon/lat -- see `_add_native_graticule`; `fmt`
+    and `hemisphere` only apply to a geographic CRS."""
+    n_ticks_x = n_ticks if n_ticks_x is None else n_ticks_x
+    n_ticks_y = n_ticks if n_ticks_y is None else n_ticks_y
+    if not _is_geographic_crs(crs):
+        _add_native_graticule(ax, extent, n_ticks_x, n_ticks_y, fontsize, color, frame)
+        return
+
     xmin, xmax, ymin, ymax = extent
     to_ll = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
     to_xy = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
@@ -91,8 +149,8 @@ def add_graticule(
     lon_min, lon_max = min(lons), max(lons)
     lat_min, lat_max = min(lats), max(lats)
 
-    lon_step = _nice_step(lon_max - lon_min, n_ticks)
-    lat_step = _nice_step(lat_max - lat_min, n_ticks)
+    lon_step = _nice_step(lon_max - lon_min, n_ticks_x)
+    lat_step = _nice_step(lat_max - lat_min, n_ticks_y)
     lon_ticks = _ticks_in_range(lon_min, lon_max, lon_step)
     lat_ticks = _ticks_in_range(lat_min, lat_max, lat_step)
 
@@ -363,7 +421,11 @@ def add_footer(
     """
     footer_cfg = cfg.get("footer", {})
     fontsize = footer_cfg.get("fontsize", 8)
-    text_color = footer_cfg.get("text_color", "0.15")
+    # str() guards against a grayscale value like "0.15" round-tripping through the
+    # workbook's config sheet as a float (0.15) -- matplotlib only accepts grayscale
+    # as a string, not a bare float, and 0.15 is otherwise indistinguishable from any
+    # other numeric setting when the sheet is parsed (see config.py::_parse_scalar).
+    text_color = str(footer_cfg.get("text_color", "0.15"))
     column_widths = footer_cfg.get("column_widths", [1.0, 1.3, 1.4, 2.1])
 
     sub = gs_cell.subgridspec(1, 4, width_ratios=column_widths, wspace=0.03)

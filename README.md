@@ -73,8 +73,12 @@ holds every sheet mapmaker needs:
   reference point rather than a grid cell — see `reference_point` below.
 - **`config`** (optional) — every rendering setting, as `scope | key | value` rows:
   - `scope` — blank (or `*`) applies the setting to every map type; set it to
-    `wind_farms`, `turbines`, or `grid_cells` to override just that one map (the
-    same base-config-plus-override pattern the old YAML files used, now one sheet).
+    `wind_farms`, `turbines`, or `grid_cells` to override just that one map. A setting
+    can just as well get three separate rows, one per map type, each with its own
+    value — that's what the generated demo workbook does for every common setting (see
+    below), so each map type's chrome (basemap, graticule, legend, ...) can be toggled
+    and tuned completely independently of the others, not just overridden from a shared
+    default.
   - `key` — a dotted path into the settings, e.g. `footer.height_fraction`,
     `style.marker_size`, `basemap.provider`, `reference_point.lon`.
   - `value` — parsed automatically: `true`/`false` → boolean, a number → int/float,
@@ -83,8 +87,12 @@ holds every sheet mapmaker needs:
 
   Any setting left out of the sheet falls back to the built-in default — see
   `mapmaker/config.py` `DEFAULTS` for the full list and what each one does.
-  `scripts/generate_test_data.py`'s `CONFIG_ROWS` is a complete worked example
-  (global settings, plus per-map-type overrides for all three map types).
+  `scripts/generate_test_data.py`'s `CONFIG_ROWS` is a complete worked example: it's
+  generated from a `COMMON_SETTINGS` dict (every shared setting's baseline value) and a
+  `PER_TYPE_SETTINGS` dict (per-map-type overrides plus map-type-only settings like
+  `export.filename`/`style.*`), so the sheet ends up with one explicit, independently
+  editable row per map type for every common setting — copy that pattern for your own
+  workbook if you want the same full independence rather than shared/global rows.
 
 Paths inside the workbook (`company.logo_path`, `export.output_dir`) are resolved
 relative to the workbook's own directory unless given as absolute paths.
@@ -127,7 +135,7 @@ simply ignored).
 
 | Key | Default | Applies to | What it does |
 |---|---|---|---|
-| `map.crs` | `EPSG:4326` | all | Coordinate reference system used for plotting and the basemap. |
+| `map.crs` | `EPSG:4326` | all | Coordinate reference system used for plotting and the basemap. Any `pyproj`-recognized CRS works, including a projected/UTM zone, e.g. `EPSG:32631` (UTM 31N) — data is reprojected from its lon/lat source columns automatically, and the graticule switches to that CRS's native units (meters, for UTM); see Layout notes, including the UTM zone-mismatch warning. |
 | `map.figsize` | `13, 8` | all | Page size in inches, `width, height` (landscape). |
 | `map.dpi` | `300` | all | Resolution (dots per inch) of the exported PNG. |
 | `map.background_color` | `white` | all | Page/figure background color. |
@@ -150,7 +158,9 @@ simply ignored).
 | Key | Default | Applies to | What it does |
 |---|---|---|---|
 | `graticule.show` | `true` | all | Toggle the coordinate grid/ticks on/off. |
-| `graticule.n_ticks` | `5` | all | Approximate number of tick/cross lines per axis. |
+| `graticule.n_ticks` | `5` | all | Approximate number of tick/cross lines per axis; shared fallback for both axes when `n_ticks_x`/`n_ticks_y` aren't set. |
+| `graticule.n_ticks_x` | *(none)* | all | Horizontal-axis (longitude) tick density, independent of the vertical axis. Falls back to `graticule.n_ticks` if unset. |
+| `graticule.n_ticks_y` | *(none)* | all | Vertical-axis (latitude) tick density, independent of the horizontal axis. Falls back to `graticule.n_ticks` if unset. |
 | `graticule.format` | `decimal` | all | `decimal` (e.g. `5.90°`) or `dms` (degrees/minutes/seconds, e.g. `5°54'00.0"`). |
 | `graticule.hemisphere_labels` | `true` | all | `true` appends `E`/`N`/`W`/`S`; `false` drops the letter and keeps a `-` sign for west/south instead. |
 | `graticule.fontsize` | `10` | all | Tick label font size. |
@@ -181,7 +191,7 @@ simply ignored).
 | `inset_map.zoom_out_factor` | `8` | all | How many times wider/taller the inset's view is than the main map's extent. |
 | `inset_map.bbox_edgecolor` | `red` | all | Color of the ROI bounding box drawn on the inset. |
 | `inset_map.bbox_linewidth` | `2.2` | all | Line width of that ROI bounding box. |
-| `inset_map.min_bbox_frac` | `0.05` | all | Floors the ROI box to at least this fraction of the inset's width/height, so it stays visible at a large `zoom_out_factor`. |
+| `inset_map.min_bbox_frac` | `0.05` | all | Floors the ROI box to at least this fraction of the inset's width/height, so it stays visible at a large `zoom_out_factor`. The demo workbook raises this to `0.12` for turbines and `0.08` for grid_cells, since their bigger `zoom_out_factor` would otherwise shrink the true ROI box to a barely-visible sliver — raise it further (or per map type) if it's still too small for your own data. |
 
 ### `reference_point.*` — single named point (grid_cells only)
 
@@ -227,15 +237,17 @@ simply ignored).
 | Key | Default | What it does |
 |---|---|---|
 | `style.marker` | `o` | Marker shape, any matplotlib marker code (`o` circle, `D` diamond, `^` triangle, ...). |
-| `style.color` | `#2166ac` | Marker color used when there's no `status` column (or for statuses missing from `status_colors`). |
-| `style.status_colors.<status>` | *(none)* | Per-status color, only used if the `wind_farms` sheet has a `status` column, e.g. `style.status_colors.Operational = #2ca25f`. |
+| `style.color` | `#2166ac` | Marker color used when there's no `status` column (or for statuses/farms missing from `status_colors`/`farm_colors`). |
+| `style.status_colors.<status>` | *(none)* | Per-status color, only used if the `wind_farms` sheet has a `status` column, e.g. `style.status_colors.Operational = #2ca25f`. Ignored if `farm_colors` is set (see below). |
+| `style.farm_colors.<name>` | *(none)* | Per-farm color, keyed by the farm's own `name` — gives each wind farm its own distinct color and its own legend entry, overriding `status`-based grouping entirely once any row is set. E.g. `style.farm_colors.Nordsee Alpha = #e6194B`. With many farms this needs a taller `footer.height_fraction` to fit every legend entry — see Layout notes. |
+| `style.legend_labels.<status-or-name>` | *(none)* | Overrides one legend entry's displayed text — keyed by `status` value normally, or by farm `name` when `farm_colors` is in use — without changing its color/grouping. E.g. `style.legend_labels.Nordsee Alpha = Nordsee Alpha (flagship)`. |
 | `style.size_field` | `capacity_mw` | Optional numeric column that scales marker size; omit the column to fall back to a fixed size. |
 | `style.base_marker_size` | `45` | Base marker size before size-field scaling. |
 | `style.size_scale` | `0.5` | Multiplier applied to `size_field`'s value before adding it to `base_marker_size`. |
 | `style.label_points` | `true` | Draw each farm's `name` next to its point. |
 | `style.label_fontsize` | `9` | Point label font size. |
 | `style.declutter_labels` | `true` | Reorient a label around its point (instead of a fixed spot) if needed to avoid overlapping another label — never dropped (see Layout notes). Farms are placed in `size_field` order (biggest first) so, when it's crowded, the more prominent farms get first pick of the tidiest spot. |
-| `style.legend_label` | `Wind Farm` | Legend entry label used when there's no `status` column. |
+| `style.legend_label` | `Wind Farm` | Legend entry label used when there's no `status` column and `farm_colors` isn't set. |
 
 **`turbines`:**
 
@@ -256,11 +268,14 @@ simply ignored).
 | `style.marker` | `D` | Fallback marker shape for any dataset not listed in `dataset_markers`. |
 | `style.dataset_markers.<dataset>` | *(none)* | Per-dataset marker shape override, e.g. `style.dataset_markers.ERA5 = D`, `style.dataset_markers.MERRA2 = o` — lets each reanalysis dataset use its own icon. |
 | `style.dataset_colors.<dataset>` | `ERA5=#3182bd, MERRA2=#e6550d` | Per-dataset color. |
+| `style.legend_labels.<dataset>` | *(none)* | Overrides one dataset's legend text (default `"<dataset> grid"`, e.g. `"ERA5 grid"`) without changing its color/marker, e.g. `style.legend_labels.ERA5 = ERA5 (0.25°)`. |
 | `style.marker_size` | `14` | Marker size (shared across datasets). |
 
-`scripts/generate_test_data.py`'s `CONFIG_ROWS` is a complete worked example of all of
-the above, and `mapmaker/config.py`'s `DEFAULTS` dict is the source of truth if this
-table and the code ever drift.
+`scripts/generate_test_data.py`'s `CONFIG_ROWS` (built from `COMMON_SETTINGS` +
+`PER_TYPE_SETTINGS`) is a complete worked example of all of the above, with every
+common setting given its own explicit, independently-toggleable row per map type; and
+`mapmaker/config.py`'s `DEFAULTS` dict is the source of truth if this table and the
+code ever drift.
 
 ## Layout notes
 
@@ -328,7 +343,36 @@ table and the code ever drift.
   panel without large empty side margins.
 - **Graticule** draws small `+` cross ticks at each grid intersection (not
   full lines across the map) with coordinate labels mirrored on all four
-  sides of the frame, matching a classic QGIS print-layout grid.
+  sides of the frame, matching a classic QGIS print-layout grid. Horizontal
+  (longitude) and vertical (latitude) tick density can be set independently via
+  `graticule.n_ticks_x`/`graticule.n_ticks_y` — useful when the map panel is much
+  wider than it is tall (or vice versa) and one shared `n_ticks` would otherwise
+  leave one axis too sparse or the other too crowded; either left unset falls back
+  to the shared `graticule.n_ticks`. Note the actual tick count is only
+  approximate either way — spacing is rounded to a "nice" number (`elements.py::_nice_step`)
+  rather than hit exactly.
+- **Projected/UTM coordinate systems work via `map.crs`** — it isn't limited to
+  `EPSG:4326`. Set it to any CRS `pyproj` recognizes, e.g. `EPSG:32631` for UTM zone
+  31N (covers the North Sea demo data); pick the zone that covers your own data's
+  longitude. Turbine/farm/grid-cell coordinates are still entered as plain lon/lat in
+  the workbook — `data_io.py`'s `read_*` functions always build points in `EPSG:4326`
+  first and then reproject to `map.crs`, so nothing about the data sheets changes. The
+  basemap and scale bar adapt automatically; the CRS label in the footer shows the
+  projected code.
+  - **Graticule ticks switch to the CRS's own native units for a projected `crs`**
+    (`elements.py::_is_geographic_crs` / `_add_native_graticule`): a UTM map gets a
+    straight easting/northing grid labeled in meters (e.g. `600,000 m`) instead of
+    reprojected lon/lat meridians — `graticule.format`/`hemisphere_labels` only apply
+    when `map.crs` is geographic (like the default `EPSG:4326`); `n_ticks`/`n_ticks_x`/
+    `n_ticks_y` still control tick density either way.
+  - **UTM is zone-based** — each zone only covers a 6°-wide longitude band around its
+    own central meridian, and distances/shapes get increasingly distorted the further
+    data sits from that meridian. If `map.crs` is a UTM EPSG code (`326xx`/`327xx`) and
+    the data spans more than ~6° of longitude, or is centered more than 3° from that
+    zone's meridian, mapmaker prints a `warnings.warn` naming the zone actually implied
+    by the data's own center (`render.py::_warn_utm_zone_mismatch`/`_utm_zone_epsg`) —
+    switch to that zone, or fall back to a non-UTM CRS (`EPSG:3857` or `EPSG:4326`) if
+    the data genuinely spans multiple zones.
 - **`reference_point` (grid_cells maps only)** marks the wind farm an ERA5/MERRA2
   comparison is centered on: a single named circle point. Toggle/style it via `config`
   rows scoped to `grid_cells` (`reference_point.show`, `.marker`, `.color`, `.size`,

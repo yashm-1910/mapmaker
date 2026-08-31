@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 import warnings
 from pathlib import Path
 
@@ -18,6 +19,44 @@ from shapely.geometry import Point
 from . import config as config_mod
 from . import data_io
 from . import elements
+
+# Matches a UTM EPSG code: 326xx (northern hemisphere, zones 01-60) or 327xx (southern).
+_UTM_EPSG_RE = re.compile(r"EPSG:32([67])(\d{2})$")
+
+
+def _utm_zone_epsg(lon: float, lat: float) -> str:
+    """The EPSG code of the UTM zone that best covers (lon, lat)."""
+    zone = int((lon + 180) / 6) % 60 + 1
+    return f"EPSG:{32600 + zone if lat >= 0 else 32700 + zone}"
+
+
+def _warn_utm_zone_mismatch(crs, gdf_4326: gpd.GeoDataFrame) -> None:
+    """Warn if `crs` is a UTM zone but the data (still in EPSG:4326 at this point, before
+    reprojection) doesn't actually sit within/near that zone. Each UTM zone only covers a
+    6-degree-wide longitude band around its own central meridian -- data spanning much more
+    than that, or centered well outside the zone, will be increasingly distorted the further
+    it sits from that meridian. Only fires for a UTM `crs`; any other projected or geographic
+    CRS isn't zone-limited in this way, so nothing to check.
+    """
+    m = _UTM_EPSG_RE.search(str(crs).upper())
+    if m is None or gdf_4326.empty:
+        return
+    zone = int(m.group(2))
+    zone_center_lon = zone * 6 - 183
+
+    minx, miny, maxx, maxy = gdf_4326.total_bounds
+    lon_span = maxx - minx
+    center_lon, center_lat = (minx + maxx) / 2, (miny + maxy) / 2
+
+    if lon_span > 6 or abs(center_lon - zone_center_lon) > 3:
+        recommended = _utm_zone_epsg(center_lon, center_lat)
+        warnings.warn(
+            f"map.crs={crs!r} is UTM zone {zone} (central meridian {zone_center_lon}°E), but "
+            f"the data spans {lon_span:.1f}° of longitude centered near {center_lon:.1f}°E -- "
+            f"distances/shapes will be increasingly distorted away from that zone's central "
+            f"meridian. Consider {recommended} instead, or a non-UTM CRS (e.g. EPSG:3857 or "
+            f"EPSG:4326) if the data genuinely spans multiple UTM zones."
+        )
 
 # ---------------------------------------------------------------------------
 # Shared figure / layout plumbing
@@ -297,8 +336,10 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
     grat = cfg.get("graticule", {})
     if grat.get("show", True):
         elements.add_graticule(
-            ax_map, crs, extent, n_ticks=grat.get("n_ticks", 5), fmt=grat.get("format", "decimal"),
-            fontsize=grat.get("fontsize", 8), color=grat.get("color", "0.35"),
+            ax_map, crs, extent, n_ticks=grat.get("n_ticks", 5),
+            n_ticks_x=grat.get("n_ticks_x"), n_ticks_y=grat.get("n_ticks_y"),
+            fmt=grat.get("format", "decimal"),
+            fontsize=grat.get("fontsize", 8), color=str(grat.get("color", "0.35")),
             linewidth=grat.get("linewidth", 0.6), frame=grat.get("frame", True),
             hemisphere=grat.get("hemisphere_labels", True),
         )
@@ -350,7 +391,9 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
 def build_wind_farm_map(cfg: dict) -> Path:
     """Render the wind-farm-locations map (map_type: wind_farms) and return the saved PNG path."""
     path = Path(cfg["_workbook_path"])
-    gdf = data_io.read_wind_farms(path).to_crs(cfg["map"]["crs"])
+    gdf = data_io.read_wind_farms(path)
+    _warn_utm_zone_mismatch(cfg["map"]["crs"], gdf)
+    gdf = gdf.to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
     style = cfg.get("style", {})
@@ -359,24 +402,39 @@ def build_wind_farm_map(cfg: dict) -> Path:
     # add a `status` column and a `style.status_colors` map to split it out by category.
     default_color = style.get("color", "#2166ac")
     status_colors = style.get("status_colors", {})
+    farm_colors = style.get("farm_colors", {})
+    legend_labels = style.get("legend_labels", {})
     size_field = style.get("size_field", "capacity_mw")
     base_size = style.get("base_marker_size", 45)
     size_scale = style.get("size_scale", 0.5)
     marker = style.get("marker", "o")
     legend_label = style.get("legend_label", "Wind Farm")
 
-    status_series = gdf["status"] if "status" in gdf.columns else pd.Series([legend_label] * len(gdf))
+    # Three coloring/grouping modes, in priority order: `farm_colors` gives each named
+    # farm its own distinct color and its own legend entry (regardless of `status`);
+    # otherwise an optional `status` column splits farms into status categories (colored
+    # via `status_colors`); otherwise every farm shares one category/color.
+    if farm_colors:
+        category_series = gdf["name"]
+        color_map = farm_colors
+    elif "status" in gdf.columns:
+        category_series = gdf["status"]
+        color_map = status_colors
+    else:
+        category_series = pd.Series([legend_label] * len(gdf))
+        color_map = {}
+
     handles = []
-    for status in sorted(status_series.unique()):
-        sub = gdf[status_series == status]
-        color = status_colors.get(status, default_color)
+    for category in sorted(category_series.unique()):
+        sub = gdf[category_series == category]
+        color = color_map.get(category, default_color)
         sizes = base_size + sub[size_field] * size_scale if size_field in sub.columns else base_size
         ax.scatter(
             sub.geometry.x, sub.geometry.y, s=sizes, marker=marker, color=color, edgecolor="black",
             linewidth=0.6, alpha=0.95, zorder=6,
         )
         handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,
-                               markeredgecolor="black", markersize=8, label=status))
+                               markeredgecolor="black", markersize=8, label=legend_labels.get(category, category)))
 
     if style.get("label_points", True) and "name" in gdf.columns:
         label_fontsize = style.get("label_fontsize", 9)
@@ -427,7 +485,9 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
                 paths.append(build_turbine_map(farm_cfg))
             return paths
 
-    gdf = data_io.read_turbines(path, farm_name=farm_name).to_crs(cfg["map"]["crs"])
+    gdf = data_io.read_turbines(path, farm_name=farm_name)
+    _warn_utm_zone_mismatch(cfg["map"]["crs"], gdf)
+    gdf = gdf.to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
     style = cfg.get("style", {})
@@ -493,13 +553,16 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
             return paths
 
     datasets = cfg["data"].get("selected_datasets")
-    gdf = data_io.read_grid_cells(path, datasets=datasets, farm_name=farm_name).to_crs(cfg["map"]["crs"])
+    gdf = data_io.read_grid_cells(path, datasets=datasets, farm_name=farm_name)
+    _warn_utm_zone_mismatch(cfg["map"]["crs"], gdf)
+    gdf = gdf.to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
     style = cfg.get("style", {})
     dataset_colors = style.get("dataset_colors", {"ERA5": "#3182bd", "MERRA2": "#e6550d"})
     default_marker = style.get("marker", "D")
     dataset_markers = style.get("dataset_markers", {})
+    legend_labels = style.get("legend_labels", {})
     marker_size = style.get("marker_size", 14)
 
     handles = []
@@ -510,7 +573,8 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
         ax.scatter(sub.geometry.x, sub.geometry.y, s=marker_size, marker=marker, color=color,
                    edgecolor="black", linewidth=0.25, zorder=6)
         handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,
-                               markeredgecolor="black", markersize=7, label=f"{dataset} grid"))
+                               markeredgecolor="black", markersize=7,
+                               label=legend_labels.get(dataset, f"{dataset} grid")))
 
     # Optional single reference point (e.g. the wind farm this grid comparison is
     # centered on), folded into the extent so the map frame accounts for it even if it

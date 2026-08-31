@@ -58,7 +58,9 @@ DEFAULTS: dict[str, Any] = {
     },
     "graticule": {
         "show": True,
-        "n_ticks": 5,               # tick/cross density per axis
+        "n_ticks": 5,               # tick/cross density, shared fallback for both axes
+        "n_ticks_x": None,          # horizontal (longitude) tick density; None -> falls back to n_ticks
+        "n_ticks_y": None,          # vertical (latitude) tick density; None -> falls back to n_ticks
         "format": "decimal",        # "decimal" | "dms"
         "hemisphere_labels": True,  # e.g. "5.90°E" vs "5.90°" (sign kept for W/S) if False
         "fontsize": 10,
