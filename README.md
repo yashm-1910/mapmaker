@@ -16,7 +16,10 @@ dedicated footer strip below the frame, so nothing ever overlaps the map.
    `farm_name`, mapmaker renders one map per farm automatically; add a
    `data.selected_farm` row in `config` (see below) to render just one.
 3. **ERA5 / MERRA-2 grid cells** (`grid_cells` sheet) — plain diamond points
-   at each cell center, one color per dataset (no filled grid polygons).
+   at each cell center, one color per dataset (no filled grid polygons). If the
+   sheet holds more than one `farm_name`, mapmaker renders one map per farm
+   automatically (one reanalysis-grid comparison per location), same as turbines;
+   add a `data.selected_farm` row to render just one.
 
 Each map type is only rendered if its sheet is present in the workbook --
 leave a sheet out (or delete it) if you don't need that map. Point marker
@@ -63,10 +66,11 @@ holds every sheet mapmaker needs:
 - **`turbines`** — required: `turbine_id, lon, lat`, plus `farm_name` if the sheet
   holds more than one farm. Other columns (hub height, rotor diameter, capacity, ...)
   are fine to include for your own records but nothing currently renders them.
-- **`grid_cells`** — required: `dataset, cell_id, lon, lat` (one row per grid cell
-  center; cells render as plain diamond points, not filled polygons, so no
-  cell-boundary columns are needed). The wind farm a grid map is centered on is *not*
-  read from this sheet — see `reference_point` below.
+- **`grid_cells`** — required: `dataset, cell_id, lon, lat`, plus `farm_name` if the
+  sheet holds more than one location (one row per grid cell center; cells render as
+  plain diamond points, not filled polygons, so no cell-boundary columns are needed).
+  A row with `dataset = reference` (instead of e.g. `ERA5`/`MERRA2`) marks a named
+  reference point rather than a grid cell — see `reference_point` below.
 - **`config`** (optional) — every rendering setting, as `scope | key | value` rows:
   - `scope` — blank (or `*`) applies the setting to every map type; set it to
     `wind_farms`, `turbines`, or `grid_cells` to override just that one map (the
@@ -184,8 +188,8 @@ simply ignored).
 | Key | Default | Applies to | What it does |
 |---|---|---|---|
 | `reference_point.show` | `false` | grid_cells | Toggle the reference point on/off. |
-| `reference_point.name` | *(empty)* | grid_cells | Label drawn next to the point, e.g. a wind farm name. |
-| `reference_point.lon` / `.lat` | *(none)* | grid_cells | Coordinates of the point — from `config`, not the `grid_cells` sheet. |
+| `reference_point.name` | *(empty)* | grid_cells | Fallback label, only used if the sheet has no matching `dataset = reference` row — normally the point's own `farm_name` row in `grid_cells` supplies the label instead (see Layout notes). |
+| `reference_point.lon` / `.lat` | *(none)* | grid_cells | Fallback coordinates, same rule — normally sourced from the sheet's `dataset = reference` row for the current farm. |
 | `reference_point.marker` | `o` | grid_cells | Marker shape, any matplotlib marker code. |
 | `reference_point.color` | `#d62728` | grid_cells | Marker color. |
 | `reference_point.size` | `70` | grid_cells | Marker size. |
@@ -213,7 +217,7 @@ simply ignored).
 
 | Key | Default | Applies to | What it does |
 |---|---|---|---|
-| `data.selected_farm` | *(none)* | turbines | Pin the render to one `farm_name` instead of auto-rendering one map per farm. |
+| `data.selected_farm` | *(none)* | turbines, grid_cells | Pin the render to one `farm_name` instead of auto-rendering one map per farm. |
 | `data.selected_datasets` | *(none)* | grid_cells | Comma-separated list of `dataset` values to include; unset renders every dataset present. |
 
 ### `style.*` — per-map-type appearance (no shared defaults; each map type reads its own keys)
@@ -313,21 +317,26 @@ table and the code ever drift.
   full lines across the map) with coordinate labels mirrored on all four
   sides of the frame, matching a classic QGIS print-layout grid.
 - **`reference_point` (grid_cells maps only)** marks the wind farm an ERA5/MERRA2
-  comparison is centered on: a single named circle point, set via `config` rows
-  scoped to `grid_cells`, e.g.:
+  comparison is centered on: a single named circle point. Toggle/style it via `config`
+  rows scoped to `grid_cells` (`reference_point.show`, `.marker`, `.color`, `.size`,
+  `.label_fontsize` — `show` defaults to `false`, so it's omitted unless you turn it on).
+  Its **position and label come from the `grid_cells` sheet itself**, not `config`: add
+  one row per farm with `dataset` set to `reference` (a reserved value, never plotted as
+  a grid cell) alongside that farm's ERA5/MERRA2 rows, e.g.:
   ```
-  scope        key                     value
-  grid_cells   reference_point.show    true
-  grid_cells   reference_point.name    Nordsee Alpha
-  grid_cells   reference_point.lon     6.35
-  grid_cells   reference_point.lat     54.65
+  farm_name       dataset     cell_id   lon    lat
+  Nordsee Alpha   reference             6.35   54.65
+  Nordsee Alpha   ERA5        ERA5-0001 ...    ...
+  Nordsee Alpha   MERRA2      ...       ...    ...
   ```
-  Its coordinates come from `config`, not the `grid_cells` sheet (it isn't part of
-  the reanalysis grid, so it doesn't belong in that data). Leaving `reference_point.show`
-  unset (the default, `false`) omits it entirely; `marker`, `color`, `size`,
-  `label_fontsize` are all overridable the same way. It's included in the map's extent
-  calculation, so the frame adjusts to keep it visible even if it sits near the edge
-  of the grid.
+  The row's own `farm_name` doubles as the on-map label, so if the sheet auto-splits
+  into one map per farm (see Map types above), each split automatically picks up *its
+  own* farm's reference row — no per-farm config needed, and a distant farm's point
+  never leaks into another farm's extent. It's included in the map's extent calculation,
+  so the frame adjusts to keep it visible even if it sits near the edge of the grid.
+  For a workbook with no `farm_name` column at all (a single combined grid map), you can
+  instead set `reference_point.name`/`.lon`/`.lat` directly in `config` as a fallback —
+  used only when the sheet has no matching `reference` row.
 
 ## Footer metadata
 

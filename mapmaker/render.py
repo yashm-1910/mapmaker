@@ -380,11 +380,36 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
 # ---------------------------------------------------------------------------
 
 
-def build_grid_map(cfg: dict) -> Path:
-    """Render the ERA5/MERRA2 grid-cells map (map_type: grid_cells) and return the saved PNG path."""
+def build_grid_map(cfg: dict) -> Path | list[Path]:
+    """Render the ERA5/MERRA2 grid-cells map (map_type: grid_cells) and return the saved PNG path.
+
+    If the `grid_cells` sheet has an optional `farm_name` column (grouping cells into
+    per-location reanalysis comparisons, e.g. one ERA5/MERRA2 subgrid per wind farm) and
+    `cfg["data"]["selected_farm"]` is left unset, this renders one map per distinct
+    `farm_name` automatically -- same recursive-split pattern as build_turbine_map --
+    and returns a list of paths instead of a single Path. Leave the column out (or set
+    `data.selected_farm`) to render a single combined grid map as before.
+    """
     path = Path(cfg["_workbook_path"])
+    farm_name = cfg["data"].get("selected_farm")
+
+    if farm_name is None:
+        all_farms = pd.read_excel(path, sheet_name="grid_cells").get("farm_name")
+        farm_names = sorted(all_farms.dropna().unique()) if all_farms is not None else []
+        if len(farm_names) > 1:
+            base_filename = cfg["export"].get("filename") or "grid_cells.png"
+            stem, suffix = Path(base_filename).stem, Path(base_filename).suffix or ".png"
+            paths = []
+            for name in farm_names:
+                farm_cfg = copy.deepcopy(cfg)
+                farm_cfg["data"]["selected_farm"] = name
+                slug = str(name).strip().lower().replace(" ", "_")
+                farm_cfg["export"]["filename"] = f"{stem}_{slug}{suffix}"
+                paths.append(build_grid_map(farm_cfg))
+            return paths
+
     datasets = cfg["data"].get("selected_datasets")
-    gdf = data_io.read_grid_cells(path, datasets=datasets).to_crs(cfg["map"]["crs"])
+    gdf = data_io.read_grid_cells(path, datasets=datasets, farm_name=farm_name).to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
     style = cfg.get("style", {})
@@ -404,12 +429,24 @@ def build_grid_map(cfg: dict) -> Path:
                                markeredgecolor="black", markersize=7, label=f"{dataset} grid"))
 
     # Optional single reference point (e.g. the wind farm this grid comparison is
-    # centered on) -- sourced from `cfg["reference_point"]` rather than the grid data
-    # file, since it's one point, not part of the reanalysis grid itself. Folded into
-    # the extent so the map frame accounts for it even if it sits near a grid edge.
-    ref = cfg.get("reference_point", {})
+    # centered on), folded into the extent so the map frame accounts for it even if it
+    # sits near a grid edge. Its position/label come from a `dataset: reference` row in
+    # the `grid_cells` sheet if one matches this farm (see data_io.read_grid_reference_point)
+    # -- naturally one reference point per farm, matched by farm_name, no extra config
+    # needed. Falls back to `cfg["reference_point"]`'s own name/lon/lat (e.g. for a
+    # workbook with no farm_name column at all); `show`/`marker`/`color`/`size`/
+    # `label_fontsize` always come from config either way.
+    ref = dict(cfg.get("reference_point", {}))
+    data_ref = data_io.read_grid_reference_point(path, farm_name)
+    if data_ref:
+        ref["lon"], ref["lat"] = data_ref["lon"], data_ref["lat"]
+        ref["name"] = data_ref["name"] or ref.get("name")
+
+    show_ref = ref.get("show", False) and ref.get("lon") is not None and ref.get("lat") is not None
+    if show_ref and not data_ref and farm_name and ref.get("name") and str(ref["name"]).strip().lower() != str(farm_name).strip().lower():
+        show_ref = False
     extent_gdf = gdf
-    if ref.get("show", False) and ref.get("lon") is not None and ref.get("lat") is not None:
+    if show_ref:
         ref_point = gpd.GeoSeries([Point(ref["lon"], ref["lat"])], crs="EPSG:4326").to_crs(cfg["map"]["crs"])
         rx, ry = ref_point.iloc[0].x, ref_point.iloc[0].y
         ref_marker = ref.get("marker", "o")
