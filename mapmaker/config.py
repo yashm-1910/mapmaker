@@ -1,4 +1,7 @@
-"""Configuration loading: YAML on top of sane defaults, with `base:` inheritance."""
+"""Configuration loading: built-in defaults, overridden by the `config` sheet of a
+single mapmaker workbook (see `load_workbook_configs`). No YAML files involved --
+one Excel workbook (data sheets + a `config` sheet) is sufficient for everything.
+"""
 from __future__ import annotations
 
 import copy
@@ -6,10 +9,13 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-import yaml
+import pandas as pd
+
+MAP_TYPES = ["wind_farms", "turbines", "grid_cells"]
 
 # ---------------------------------------------------------------------------
-# Built-in defaults. Any field omitted from a user's YAML falls back to this.
+# Built-in defaults. Any setting not present in the workbook's `config` sheet
+# falls back to this.
 # ---------------------------------------------------------------------------
 DEFAULTS: dict[str, Any] = {
     "map_type": None,  # "wind_farms" | "turbines" | "grid_cells"
@@ -43,6 +49,10 @@ DEFAULTS: dict[str, Any] = {
         # "CartoDB.Positron" or "Esri.WorldGrayCanvas", for a more muted basemap look.
         "provider": "OpenStreetMap.Mapnik",
         "zoom": "auto",
+        # Bumps the auto-computed tile zoom level up by this many levels, fetching
+        # sharper/more-detailed tiles for the same extent (each +1 roughly doubles
+        # tile resolution in each dimension). 0 = contextily's own auto choice.
+        "zoom_adjust": 1,
         "alpha": 1.0,
         "headers": {"User-Agent": "mapmaker-tuhh/1.0 (contact: replace-with-your-email)"},
     },
@@ -50,6 +60,7 @@ DEFAULTS: dict[str, Any] = {
         "show": True,
         "n_ticks": 5,               # tick/cross density per axis
         "format": "decimal",        # "decimal" | "dms"
+        "hemisphere_labels": True,  # e.g. "5.90°E" vs "5.90°" (sign kept for W/S) if False
         "fontsize": 10,
         "color": "0.35",
         "linewidth": 0.6,
@@ -85,7 +96,7 @@ DEFAULTS: dict[str, Any] = {
         "min_bbox_frac": 0.05,  # ROI box is floored to this fraction of the inset's width/height
     },
     # Optional single reference point (e.g. the wind farm a grid_cells map's ERA5/MERRA2
-    # comparison is centered on), sourced from config -- not from the grid data file,
+    # comparison is centered on), sourced from config -- not from the grid data sheet,
     # since it's one point rather than part of the reanalysis grid. Only used by
     # map_type: grid_cells; ignored otherwise. See render.py::build_grid_map.
     "reference_point": {
@@ -106,14 +117,11 @@ DEFAULTS: dict[str, Any] = {
         "text_color": "0.15",
     },
     "export": {
-        "output_dir": "output",
-        "filename": "map.png",
+        "output_dir": "../output",  # relative to the workbook's own directory, e.g. data/mapmaker.xlsx -> output/
+        "filename": "",  # empty -> defaults to "<map_type>.png" (see render.py)
         "transparent": False,
     },
     "data": {
-        "wind_farms_file": "data/wind_farms.xlsx",
-        "turbines_file": "data/turbines.xlsx",
-        "grid_cells_file": "data/grid_cells.xlsx",
         "selected_farm": None,
         "selected_datasets": None,
     },
@@ -132,24 +140,44 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_yaml(path: str | Path) -> dict:
-    """Read a YAML file into a plain dict (empty dict if the file has no content)."""
-    path = Path(path)
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+def _parse_scalar(raw: Any) -> Any:
+    """Coerce one raw `config` sheet cell value into a Python bool/int/float/None/list/str."""
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return raw
+    text = str(raw).strip()
+    low = text.lower()
+    if low in ("", "none", "null"):
+        return None
+    if low in ("true", "yes"):
+        return True
+    if low in ("false", "no"):
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    if "," in text:
+        return [_parse_scalar(part) for part in text.split(",")]
+    return text
 
 
-def _load_merged_dict(path: str | Path) -> dict:
-    """Load one config file, recursively merging in its `base:` config (if any) and DEFAULTS."""
-    path = Path(path)
-    raw = load_yaml(path)
-    base_name = raw.pop("base", None)
-    merged = copy.deepcopy(DEFAULTS)
-    if base_name:
-        base_path = path.parent / base_name
-        merged = deep_merge(merged, _load_merged_dict(base_path))
-    merged = deep_merge(merged, raw)
-    return merged
+def _set_dotted(target: dict, dotted_key: str, value: Any) -> None:
+    """Set `target["a"]["b"]["c"] = value` for a dotted key `"a.b.c"`, creating dicts as needed."""
+    parts = [p.strip() for p in dotted_key.split(".") if p.strip()]
+    if not parts:
+        return
+    node = target
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = value
 
 
 def resolve_date(cfg: dict) -> dict:
@@ -159,17 +187,51 @@ def resolve_date(cfg: dict) -> dict:
     return cfg
 
 
-def load_config(path: str | Path) -> dict:
-    """Load a map config YAML, merged with any `base:` config and the built-in defaults."""
+def load_workbook_configs(path: str | Path) -> dict[str, dict]:
+    """Build one merged config dict per map type that has a matching data sheet in the
+    workbook (`wind_farms`, `turbines`, `grid_cells`), read from its optional `config`
+    sheet. That sheet has three columns: `scope` (blank/`*` = applies to every map type,
+    or one of the map type names to override just that one), `key` (a dotted path into
+    the settings, e.g. `footer.height_fraction`, `style.marker_size`), and `value`.
+
+    Returns a dict {map_type: cfg}, in `MAP_TYPES` order, for whichever map types are
+    present. Each cfg has `_workbook_path` / `_config_dir` set for resolving other
+    relative paths (e.g. `company.logo_path`) against the workbook's own directory.
+    """
     path = Path(path)
-    cfg = _load_merged_dict(path)
-    cfg = resolve_date(cfg)
-    cfg["_config_dir"] = str(path.parent)
-    return cfg
+    xl = pd.ExcelFile(path)
+
+    global_overrides: dict = {}
+    scoped_overrides: dict[str, dict] = {mt: {} for mt in MAP_TYPES}
+    if "config" in xl.sheet_names:
+        cfg_df = pd.read_excel(path, sheet_name="config")
+        for _, row in cfg_df.iterrows():
+            key = row.get("key")
+            if key is None or (isinstance(key, float) and pd.isna(key)) or not str(key).strip():
+                continue
+            value = _parse_scalar(row.get("value"))
+            scope = row.get("scope")
+            scope = str(scope).strip() if scope is not None and not pd.isna(scope) else ""
+            target = scoped_overrides[scope] if scope in scoped_overrides else global_overrides
+            _set_dotted(target, str(key).strip(), value)
+
+    configs: dict[str, dict] = {}
+    for map_type in MAP_TYPES:
+        if map_type not in xl.sheet_names:
+            continue
+        cfg = copy.deepcopy(DEFAULTS)
+        cfg = deep_merge(cfg, global_overrides)
+        cfg = deep_merge(cfg, scoped_overrides[map_type])
+        cfg["map_type"] = map_type
+        cfg = resolve_date(cfg)
+        cfg["_workbook_path"] = str(path)
+        cfg["_config_dir"] = str(path.parent)
+        configs[map_type] = cfg
+    return configs
 
 
 def resolve_path(cfg: dict, p: str | Path | None) -> Path | None:
-    """Resolve a possibly-relative path against the directory of the loaded config file."""
+    """Resolve a possibly-relative path (e.g. a logo or output dir) against the workbook's directory."""
     if not p:
         return None
     pp = Path(p)

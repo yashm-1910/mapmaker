@@ -41,17 +41,20 @@ def _ticks_in_range(vmin: float, vmax: float, step: float) -> list[float]:
     return ticks
 
 
-def _fmt_coord(value: float, kind: str, fmt: str) -> str:
-    """Format a lon/lat value as a hemisphere-suffixed decimal-degree or DMS string."""
+def _fmt_coord(value: float, kind: str, fmt: str, hemisphere: bool = True) -> str:
+    """Format a lon/lat value as a decimal-degree or DMS string, optionally hemisphere-suffixed
+    (e.g. "5.90°E"); with `hemisphere=False` the sign is kept instead (e.g. "-5.90°")."""
     hemi = ("E" if value >= 0 else "W") if kind == "lon" else ("N" if value >= 0 else "S")
+    sign = "" if (hemisphere or value >= 0) else "-"
+    suffix = hemi if hemisphere else ""
     v = abs(value)
     if fmt == "dms":
         d = int(v)
         m_full = (v - d) * 60
         m = int(m_full)
         s = (m_full - m) * 60
-        return f"{d}°{m:02d}'{s:04.1f}\"{hemi}"
-    return f"{v:.2f}°{hemi}"
+        return f"{sign}{d}°{m:02d}'{s:04.1f}\"{suffix}"
+    return f"{sign}{v:.2f}°{suffix}"
 
 
 def add_graticule(
@@ -65,6 +68,7 @@ def add_graticule(
     linewidth: float = 0.6,
     linestyle=None,
     frame: bool = True,
+    hemisphere: bool = True,
 ) -> None:
     """Draw small cross ticks at each graticule intersection, with coordinate labels
     mirrored on all four sides of the frame -- matching a classic QGIS print layout
@@ -121,9 +125,9 @@ def add_graticule(
         yticks = {ymin: to_ll.transform(xmin, ymin)[1], ymax: to_ll.transform(xmin, ymax)[1]}
 
     ax.set_xticks(xs_sorted)
-    ax.set_xticklabels([_fmt_coord(xticks[x], "lon", fmt) for x in xs_sorted], fontsize=fontsize)
+    ax.set_xticklabels([_fmt_coord(xticks[x], "lon", fmt, hemisphere) for x in xs_sorted], fontsize=fontsize)
     ax.set_yticks(ys_sorted)
-    ax.set_yticklabels([_fmt_coord(yticks[y], "lat", fmt) for y in ys_sorted], fontsize=fontsize, rotation=90, va="center")
+    ax.set_yticklabels([_fmt_coord(yticks[y], "lat", fmt, hemisphere) for y in ys_sorted], fontsize=fontsize, rotation=90, va="center")
     ax.tick_params(colors="black", labelsize=fontsize, direction="out", length=4,
                     top=True, labeltop=True, right=True, labelright=True)
     if frame:
@@ -281,6 +285,7 @@ def add_inset_map(
     bbox_edgecolor: str = "red",
     bbox_linewidth: float = 2.2,
     basemap_headers: dict | None = None,
+    basemap_zoom_adjust: int = 0,
     min_bbox_frac: float = 0.05,
 ):
     """Add a small overview-map inset to `ax`, zoomed out `zoom_out_factor` times around the
@@ -314,7 +319,8 @@ def add_inset_map(
 
     if basemap_provider is not False and basemap_provider is not None:
         try:
-            cx.add_basemap(axins, crs=crs, source=basemap_provider, attribution=False, headers=basemap_headers)
+            cx.add_basemap(axins, crs=crs, source=basemap_provider, attribution=False, headers=basemap_headers,
+                           zoom_adjust=basemap_zoom_adjust or None)
         except Exception as e:  # pragma: no cover - network dependent
             warnings.warn(f"Inset basemap fetch failed ({e}); using flat fill instead.")
             axins.set_facecolor("#dce6f2")

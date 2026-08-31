@@ -1,1 +1,1 @@
-"""mapmaker: QGIS-style, YAML-configured map generation for wind energy datasets."""
+"""mapmaker: QGIS-style map generation for wind energy datasets, driven by a single Excel workbook."""

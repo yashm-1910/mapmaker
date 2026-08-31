@@ -200,6 +200,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
         try:
             cx.add_basemap(
                 ax_map, crs=crs, source=provider, zoom=basemap_cfg.get("zoom", "auto"),
+                zoom_adjust=basemap_cfg.get("zoom_adjust", 0) or None,
                 alpha=basemap_cfg.get("alpha", 1.0), attribution=False,
                 headers=basemap_cfg.get("headers"),
             )
@@ -213,6 +214,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             ax_map, crs, extent, n_ticks=grat.get("n_ticks", 5), fmt=grat.get("format", "decimal"),
             fontsize=grat.get("fontsize", 8), color=grat.get("color", "0.35"),
             linewidth=grat.get("linewidth", 0.6), frame=grat.get("frame", True),
+            hemisphere=grat.get("hemisphere_labels", True),
         )
     else:
         ax_map.set_xticks([])
@@ -229,6 +231,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             location=ins.get("location", "lower left"), size=ins.get("size", 0.28),
             basemap_provider=provider, bbox_edgecolor=ins.get("bbox_edgecolor", "red"),
             bbox_linewidth=ins.get("bbox_linewidth", 2.2), basemap_headers=basemap_cfg.get("headers"),
+            basemap_zoom_adjust=basemap_cfg.get("zoom_adjust", 0),
             min_bbox_frac=ins.get("min_bbox_frac", 0.05),
         )
 
@@ -244,7 +247,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
 
     out_dir = config_mod.resolve_path(cfg, cfg["export"].get("output_dir", "output"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / cfg["export"].get("filename", "map.png")
+    out_path = out_dir / (cfg["export"].get("filename") or f"{cfg['map_type']}.png")
     fig.savefig(
         out_path, dpi=cfg["map"].get("dpi", 300), facecolor=fig.get_facecolor(),
         transparent=cfg["export"].get("transparent", False),
@@ -260,7 +263,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
 
 def build_wind_farm_map(cfg: dict) -> Path:
     """Render the wind-farm-locations map (map_type: wind_farms) and return the saved PNG path."""
-    path = config_mod.resolve_path(cfg, cfg["data"]["wind_farms_file"])
+    path = Path(cfg["_workbook_path"])
     gdf = data_io.read_wind_farms(path).to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
@@ -321,14 +324,14 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
     filename suffixed by a slug of the farm name) and returns a list of paths, in
     farm-name order, instead of a single Path.
     """
-    path = config_mod.resolve_path(cfg, cfg["data"]["turbines_file"])
+    path = Path(cfg["_workbook_path"])
     farm_name = cfg["data"].get("selected_farm")
 
     if farm_name is None:
-        all_farms = pd.read_excel(path).get("farm_name")
+        all_farms = pd.read_excel(path, sheet_name="turbines").get("farm_name")
         farm_names = sorted(all_farms.dropna().unique()) if all_farms is not None else []
         if len(farm_names) > 1:
-            base_filename = cfg["export"].get("filename", "map.png")
+            base_filename = cfg["export"].get("filename") or "turbines.png"
             stem, suffix = Path(base_filename).stem, Path(base_filename).suffix or ".png"
             paths = []
             for name in farm_names:
@@ -379,20 +382,22 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
 
 def build_grid_map(cfg: dict) -> Path:
     """Render the ERA5/MERRA2 grid-cells map (map_type: grid_cells) and return the saved PNG path."""
-    path = config_mod.resolve_path(cfg, cfg["data"]["grid_cells_file"])
+    path = Path(cfg["_workbook_path"])
     datasets = cfg["data"].get("selected_datasets")
     gdf = data_io.read_grid_cells(path, datasets=datasets).to_crs(cfg["map"]["crs"])
 
     fig, ax, footer_gs, target_aspect = _new_figure(cfg)
     style = cfg.get("style", {})
     dataset_colors = style.get("dataset_colors", {"ERA5": "#3182bd", "MERRA2": "#e6550d"})
+    default_marker = style.get("marker", "D")
+    dataset_markers = style.get("dataset_markers", {})
     marker_size = style.get("marker_size", 14)
-    marker = style.get("marker", "D")
 
     handles = []
     for dataset in sorted(gdf["dataset"].unique()):
         sub = gdf[gdf["dataset"] == dataset]
         color = dataset_colors.get(dataset, "#555555")
+        marker = dataset_markers.get(dataset, default_marker)
         ax.scatter(sub.geometry.x, sub.geometry.y, s=marker_size, marker=marker, color=color,
                    edgecolor="black", linewidth=0.25, zorder=6)
         handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,

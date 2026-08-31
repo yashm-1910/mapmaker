@@ -1,4 +1,4 @@
-"""Read map input data from Excel workbooks into GeoDataFrames."""
+"""Read map input data from the mapmaker workbook's sheets into GeoDataFrames."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,7 +9,7 @@ from shapely.geometry import Point
 
 
 def read_wind_farms(path: str | Path) -> gpd.GeoDataFrame:
-    """Load wind farm point locations from an Excel workbook.
+    """Load wind farm point locations from the workbook's `wind_farms` sheet.
 
     Required columns: name, lon, lat.
     Optional columns (used if present, ignored otherwise): capacity_mw (marker sizing,
@@ -17,13 +17,14 @@ def read_wind_farms(path: str | Path) -> gpd.GeoDataFrame:
     Any other columns (e.g. country) are read but not used for rendering.
     Returns a GeoDataFrame of Point geometries in EPSG:4326.
     """
-    df = pd.read_excel(path)
+    df = pd.read_excel(path, sheet_name="wind_farms")
     geometry = [Point(xy) for xy in zip(df["lon"], df["lat"])]
     return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
 
 def read_turbines(path: str | Path, farm_name: str | None = None) -> gpd.GeoDataFrame:
-    """Load turbine point locations from an Excel workbook, optionally filtered to one farm.
+    """Load turbine point locations from the workbook's `turbines` sheet, optionally
+    filtered to one farm.
 
     Required columns: turbine_id, lon, lat, and farm_name (only if `farm_name` is passed).
     Any other columns (e.g. hub_height_m, rotor_diameter_m, capacity_mw) are read but not
@@ -32,7 +33,7 @@ def read_turbines(path: str | Path, farm_name: str | None = None) -> gpd.GeoData
 
     Raises ValueError if `farm_name` is given but matches no rows.
     """
-    df = pd.read_excel(path)
+    df = pd.read_excel(path, sheet_name="turbines")
     if farm_name:
         df = df[df["farm_name"] == farm_name].reset_index(drop=True)
     if df.empty:
@@ -42,7 +43,8 @@ def read_turbines(path: str | Path, farm_name: str | None = None) -> gpd.GeoData
 
 
 def read_grid_cells(path: str | Path, datasets: list[str] | None = None) -> gpd.GeoDataFrame:
-    """Load reanalysis grid cell center points from an Excel workbook, optionally filtered by dataset.
+    """Load reanalysis grid cell center points from the workbook's `grid_cells` sheet,
+    optionally filtered by dataset.
 
     Required columns: dataset, cell_id, lon, lat. Cells are rendered as plain diamond
     points (no filled grid polygons), so only the cell center coordinate is needed --
@@ -51,7 +53,7 @@ def read_grid_cells(path: str | Path, datasets: list[str] | None = None) -> gpd.
 
     Raises ValueError if `datasets` is given but matches no rows.
     """
-    df = pd.read_excel(path)
+    df = pd.read_excel(path, sheet_name="grid_cells")
     if datasets:
         df = df[df["dataset"].isin(datasets)].reset_index(drop=True)
     if df.empty:

@@ -1,10 +1,8 @@
 """CLI entry point for mapmaker.
 
 Usage:
-    python main.py --config configs/wind_farms.yaml
-    python main.py --config configs/turbines.yaml
-    python main.py --config configs/grid_cells.yaml
-    python main.py --batch configs/batch.yaml
+    python main.py --file data/mapmaker.xlsx
+    python main.py --file data/mapmaker.xlsx --map-type turbines
 """
 from __future__ import annotations
 
@@ -12,7 +10,6 @@ import argparse
 import sys
 
 from mapmaker import config as config_mod
-from mapmaker.batch import run_batch
 from mapmaker.render import build_grid_map, build_turbine_map, build_wind_farm_map
 
 BUILDERS = {
@@ -23,26 +20,32 @@ BUILDERS = {
 
 
 def main() -> None:
-    """Parse CLI args and dispatch to either a single map render or a batch run."""
-    parser = argparse.ArgumentParser(description="Generate QGIS-style maps from Excel data and YAML config.")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--config", help="Path to a single map config YAML")
-    group.add_argument("--batch", help="Path to a batch config YAML")
+    """Parse CLI args and render one map per data sheet present in the workbook."""
+    parser = argparse.ArgumentParser(
+        description="Generate QGIS-style maps from a single Excel workbook (data + config sheets)."
+    )
+    parser.add_argument("--file", required=True, help="Path to the mapmaker workbook (.xlsx)")
+    parser.add_argument(
+        "--map-type", choices=list(BUILDERS), default=None,
+        help="Render only this map type (default: every data sheet present in the workbook)",
+    )
     args = parser.parse_args()
 
-    if args.batch:
-        run_batch(args.batch)
-        return
+    configs = config_mod.load_workbook_configs(args.file)
+    if not configs:
+        sys.exit(
+            f"{args.file} has none of the expected data sheets "
+            f"({', '.join(config_mod.MAP_TYPES)}); nothing to render."
+        )
 
-    cfg = config_mod.load_config(args.config)
-    map_type = cfg.get("map_type")
-    builder = BUILDERS.get(map_type)
-    if not builder:
-        sys.exit(f"Config {args.config} is missing a valid map_type (got {map_type!r}); "
-                  f"expected one of {list(BUILDERS)}")
-    out = builder(cfg)
-    for p in out if isinstance(out, list) else [out]:
-        print(f"Saved: {p}")
+    map_types = [args.map_type] if args.map_type else list(configs)
+    for map_type in map_types:
+        cfg = configs.get(map_type)
+        if cfg is None:
+            sys.exit(f"{args.file} has no '{map_type}' sheet.")
+        out = BUILDERS[map_type](cfg)
+        for p in out if isinstance(out, list) else [out]:
+            print(f"Saved: {p}")
 
 
 if __name__ == "__main__":
