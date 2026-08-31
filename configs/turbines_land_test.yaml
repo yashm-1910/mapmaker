@@ -1,0 +1,13 @@
+base: turbines.yaml
+map_type: turbines
+
+# Reproduces the "land-based turbines, new/separate data file" case: a
+# different Excel file from the default data/turbines.xlsx, referenced via
+# a data.turbines_file override (path is relative to *this config file's*
+# directory, i.e. configs/ -- see mapmaker/config.py::resolve_path).
+data:
+  turbines_file: "../data/test_land_turbines.xlsx"
+  selected_farm: "Land Test Farm"
+
+export:
+  filename: "turbines_land_test.png"
