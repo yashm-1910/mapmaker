@@ -19,6 +19,7 @@ MAP_TYPES = ["wind_farms", "turbines", "grid_cells"]
 # ---------------------------------------------------------------------------
 DEFAULTS: dict[str, Any] = {
     "map_type": None,  # "wind_farms" | "turbines" | "grid_cells"
+    "enabled": True,  # set false (per map type, via a scoped row) to skip rendering it entirely
     "author": "Unknown Author",
     "date": "auto",  # "auto" -> today's date, or an explicit string
     "title": "",
@@ -55,6 +56,12 @@ DEFAULTS: dict[str, Any] = {
         "zoom_adjust": 1,
         "alpha": 1.0,
         "headers": {"User-Agent": "mapmaker-tuhh/1.0 (contact: replace-with-your-email)"},
+        # matplotlib's imshow resampling used when the (fixed-resolution) basemap tiles are
+        # scaled up to the map panel's print size -- "bilinear" is the safe default; try
+        # "lanczos" for crisper-looking tile text/lines (at the cost of possible ringing
+        # artifacts on hard edges). Raising zoom_adjust helps more than this does, since it
+        # fetches genuinely more detailed tiles instead of just resampling the same ones.
+        "interpolation": "bilinear",
     },
     "graticule": {
         "show": True,
@@ -189,24 +196,39 @@ def resolve_date(cfg: dict) -> dict:
     return cfg
 
 
+# Sheet names read as config/settings sheets, in this order (later ones can override
+# earlier ones on a literal key clash, though in the shipped layout they're disjoint
+# by convention -- "settings_basic" for what you'd tweak often, "settings_advanced" for
+# fine-tuning knobs you'd rarely touch; "config" is accepted too for a single-sheet
+# workbook or backward compatibility with an older one).
+CONFIG_SHEET_NAMES = ["config", "settings_basic", "settings_advanced"]
+
+
 def load_workbook_configs(path: str | Path) -> dict[str, dict]:
     """Build one merged config dict per map type that has a matching data sheet in the
-    workbook (`wind_farms`, `turbines`, `grid_cells`), read from its optional `config`
-    sheet. That sheet has three columns: `scope` (blank/`*` = applies to every map type,
+    workbook (`wind_farms`, `turbines`, `grid_cells`), read from whichever of
+    `CONFIG_SHEET_NAMES` are present. Each such sheet has the same three columns (a
+    fourth, `description`, is allowed and ignored by the parser -- it's there purely
+    for a human reading the workbook): `scope` (blank/`*` = applies to every map type,
     or one of the map type names to override just that one), `key` (a dotted path into
     the settings, e.g. `footer.height_fraction`, `style.marker_size`), and `value`.
 
     Returns a dict {map_type: cfg}, in `MAP_TYPES` order, for whichever map types are
-    present. Each cfg has `_workbook_path` / `_config_dir` set for resolving other
-    relative paths (e.g. `company.logo_path`) against the workbook's own directory.
+    present -- including one whose `enabled` setting resolves to `False`; the caller
+    (see main.py) is responsible for skipping those rather than this function omitting
+    them, so a disabled map type's config is still inspectable/loadable. Each cfg has
+    `_workbook_path` / `_config_dir` set for resolving other relative paths (e.g.
+    `company.logo_path`) against the workbook's own directory.
     """
     path = Path(path)
     xl = pd.ExcelFile(path)
 
     global_overrides: dict = {}
     scoped_overrides: dict[str, dict] = {mt: {} for mt in MAP_TYPES}
-    if "config" in xl.sheet_names:
-        cfg_df = pd.read_excel(path, sheet_name="config")
+    for sheet_name in CONFIG_SHEET_NAMES:
+        if sheet_name not in xl.sheet_names:
+            continue
+        cfg_df = pd.read_excel(path, sheet_name=sheet_name)
         for _, row in cfg_df.iterrows():
             key = row.get("key")
             if key is None or (isinstance(key, float) and pd.isna(key)) or not str(key).strip():

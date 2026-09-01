@@ -43,6 +43,13 @@ def main() -> None:
         cfg = configs.get(map_type)
         if cfg is None:
             sys.exit(f"{args.file} has no '{map_type}' sheet.")
+        # `enabled` (a config row, e.g. scope=turbines, key=enabled, value=false) lets a
+        # map type's data/config stay in the workbook without being rendered every run --
+        # only honored for the "render everything present" default; an explicit
+        # --map-type always renders regardless, since that's a direct request.
+        if not args.map_type and not cfg.get("enabled", True):
+            print(f"Skipped (enabled=false): {map_type}")
+            continue
         out = BUILDERS[map_type](cfg)
         for p in out if isinstance(out, list) else [out]:
             print(f"Saved: {p}")

@@ -9,23 +9,25 @@ dedicated footer strip below the frame, so nothing ever overlaps the map.
 
 ## Map types
 
-1. **Wind farm locations** (`wind_farms` sheet) — point map of farms, colored
-   by status, sized by capacity.
-2. **Turbine positions** (`turbines` sheet) — turbine layout within one farm,
-   uniform-colored points with ID labels. If the sheet holds more than one
-   `farm_name`, mapmaker renders one map per farm automatically; add a
-   `data.selected_farm` row in `config` (see below) to render just one.
-3. **ERA5 / MERRA-2 grid cells** (`grid_cells` sheet) — plain diamond points
-   at each cell center, one color per dataset (no filled grid polygons). If the
+1. **Wind farm locations** (`wind_farms` sheet) — point map of farms. Colored by an
+   optional `status` column, or by `style.farm_colors.<name>` (one distinct color per
+   farm, takes priority over `status`), or one uniform color if neither is set.
+2. **Turbine positions** (`turbines` sheet) — turbine layout within one farm. If the
    sheet holds more than one `farm_name`, mapmaker renders one map per farm
-   automatically (one reanalysis-grid comparison per location), same as turbines;
-   add a `data.selected_farm` row to render just one.
+   automatically; add a `data.selected_farm` row (`settings_advanced`) to render just
+   one. Uniform-colored by default, or colored by any column via `style.color_field`
+   (e.g. a turbine type/model, or an existing numeric column like `rotor_diameter_m`
+   used categorically) — see Config option reference.
+3. **ERA5 / MERRA-2 grid cells** (`grid_cells` sheet) — plain diamond/circle points at
+   each cell center, one color per dataset (no filled grid polygons). Same per-farm
+   auto-split as turbines. An optional `label` column labels individual cells (blank
+   cells stay unlabeled — most grids have far too many cells to label every one).
 
-Each map type is only rendered if its sheet is present in the workbook --
-leave a sheet out (or delete it) if you don't need that map. Point marker
-shape (`style.marker`, any matplotlib marker code) and size are configurable
-per map type; defaults are round points for wind farms/turbines and diamonds
-for the reanalysis grids.
+Each map type is only rendered if its sheet is present in the workbook *and* its
+`enabled` setting isn't `false` (see below) — leave a sheet out, or just disable it,
+if you don't need that map. Point marker shape (`style.marker`, any matplotlib marker
+code) and size are configurable per map type; defaults are round points for wind
+farms/turbines and diamonds for the reanalysis grids.
 
 ## Setup
 
@@ -54,7 +56,9 @@ python main.py --file data/mapmaker.xlsx --map-type turbines   # just one map ty
 ```
 
 Every data sheet present in the workbook (`wind_farms` / `turbines` / `grid_cells`)
-renders in one command; outputs land in `output/`.
+renders in one command, skipping any map type whose `enabled` setting is `false`
+(an explicit `--map-type` always renders regardless — it's a direct request); outputs
+land in `output/`.
 
 ## The workbook (one Excel file for everything)
 
@@ -64,182 +68,201 @@ holds every sheet mapmaker needs:
 - **`wind_farms`** — required: `name, lon, lat`. Optional: `capacity_mw` (marker
   sizing, `style.size_field`), `status` (per-category coloring, `style.status_colors`).
 - **`turbines`** — required: `turbine_id, lon, lat`, plus `farm_name` if the sheet
-  holds more than one farm. Other columns (hub height, rotor diameter, capacity, ...)
-  are fine to include for your own records but nothing currently renders them.
+  holds more than one farm. Other columns (hub height, rotor diameter, capacity, a
+  turbine type/model, ...) are fine to include for your own records, and any of them
+  can double as `style.color_field` to color by (see Map types above).
 - **`grid_cells`** — required: `dataset, cell_id, lon, lat`, plus `farm_name` if the
-  sheet holds more than one location (one row per grid cell center; cells render as
-  plain diamond points, not filled polygons, so no cell-boundary columns are needed).
-  A row with `dataset = reference` (instead of e.g. `ERA5`/`MERRA2`) marks a named
-  reference point rather than a grid cell — see `reference_point` below.
-- **`config`** (optional) — every rendering setting, as `scope | key | value` rows:
+  sheet holds more than one location, plus an optional `label` column (one row per
+  grid cell center; cells render as plain diamond/circle points, not filled polygons,
+  so no cell-boundary columns are needed). A row with `dataset = reference` (instead
+  of e.g. `ERA5`/`MERRA2`) marks a named reference point rather than a grid cell — see
+  `reference_point` in Layout notes.
+- **`settings_basic`** / **`settings_advanced`** — every rendering setting, as
+  `scope | key | value | description` rows. Both sheets share the same schema and are
+  read together (a `config` sheet also still works, e.g. for a single-sheet workbook);
+  splitting them is purely organizational:
+  - **`settings_basic`** — what you'd plausibly change often: titles, author/date,
+    company/logo, colors and other `style.*` appearance, on/off toggles for every
+    chrome element, each map type's own `enabled` switch, and output filenames.
+  - **`settings_advanced`** — fine-tuning knobs you'd rarely touch: page margins,
+    DPI, tick density, inset/bbox sizing, footer column ratios, basemap technical
+    params, and which farm/dataset to render when you don't want the auto-split.
+
+  Columns:
   - `scope` — blank (or `*`) applies the setting to every map type; set it to
-    `wind_farms`, `turbines`, or `grid_cells` to override just that one map. A setting
-    can just as well get three separate rows, one per map type, each with its own
-    value — that's what the generated demo workbook does for every common setting (see
-    below), so each map type's chrome (basemap, graticule, legend, ...) can be toggled
-    and tuned completely independently of the others, not just overridden from a shared
-    default.
+    `wind_farms`, `turbines`, or `grid_cells` to override just that one map. **A
+    setting that's the same for every map type gets one global (blank-scope) row —
+    it isn't repeated per type.** Only settings that genuinely need to differ (or are
+    inherently type-specific, like `style.*` or `export.filename`) get their own
+    scoped row per type; the scope mechanism still supports overriding literally any
+    key for any single map type, this just keeps the shipped example from cluttering
+    itself with redundant identical rows. Copy the pattern from
+    `scripts/generate_test_data.py`'s `BASIC_ROWS`/`ADVANCED_ROWS` for your own
+    workbook: one row per setting, scoped only where the value actually needs to
+    differ.
   - `key` — a dotted path into the settings, e.g. `footer.height_fraction`,
-    `style.marker_size`, `basemap.provider`, `reference_point.lon`.
+    `style.marker_size`, `basemap.provider`, `style.farm_colors.Nordsee Alpha`.
   - `value` — parsed automatically: `true`/`false` → boolean, a number → int/float,
     a comma-separated cell (e.g. `1.0, 1.3, 1.4, 2.1`) → a list, anything else →
-    string. Leave a row out entirely to use the built-in default for that setting.
+    string. Leave a row out entirely (or leave `value` blank) to use the built-in
+    default for that setting.
+  - `description` — free text for a human reading the workbook; mapmaker's parser
+    ignores this column entirely, so put whatever's useful there.
 
-  Any setting left out of the sheet falls back to the built-in default — see
-  `mapmaker/config.py` `DEFAULTS` for the full list and what each one does.
-  `scripts/generate_test_data.py`'s `CONFIG_ROWS` is a complete worked example: it's
-  generated from a `COMMON_SETTINGS` dict (every shared setting's baseline value) and a
-  `PER_TYPE_SETTINGS` dict (per-map-type overrides plus map-type-only settings like
-  `export.filename`/`style.*`), so the sheet ends up with one explicit, independently
-  editable row per map type for every common setting — copy that pattern for your own
-  workbook if you want the same full independence rather than shared/global rows.
+  Any setting left out of both sheets falls back to the built-in default — see
+  `mapmaker/config.py`'s `DEFAULTS` for the full list and what each one does, or the
+  Config option reference below. `scripts/generate_test_data.py`'s `BASIC_ROWS` /
+  `ADVANCED_ROWS` are a complete worked example of literally every option, each with
+  its own description.
 
 Paths inside the workbook (`company.logo_path`, `export.output_dir`) are resolved
 relative to the workbook's own directory unless given as absolute paths.
 
 See `mapmaker/data_io.py` for the exact column contract each `read_*` function enforces,
-and `mapmaker/config.py::load_workbook_configs` for exactly how the `config` sheet is parsed.
+and `mapmaker/config.py::load_workbook_configs` for exactly how the settings sheets are parsed.
 
-`title` / `subtitle` are omitted by default: if the `config` sheet doesn't set them,
+`title` / `subtitle` are omitted by default: if the settings sheets don't set them,
 no title is drawn and the map reclaims that vertical space — add `title`/`subtitle`
 rows (global or per map type) when you want one.
 
 ## Config option reference
 
-Every `key` you can put in the `config` sheet, grouped the same way as
-`mapmaker/config.py`'s `DEFAULTS`. "Applies to" shows which map type(s) actually use
-that setting — put those rows in `scope`-appropriate rows (global rows with a blank
-scope are read by every map type, but a setting a given map type doesn't use is
-simply ignored).
+Every `key` you can put in `settings_basic`/`settings_advanced`, grouped the same way
+as `mapmaker/config.py`'s `DEFAULTS`. "Sheet" shows where the shipped demo workbook
+puts that setting (purely a convention — either sheet works for any key); "Applies to"
+shows which map type(s) actually use it (global rows with a blank `scope` are read by
+every map type, but a setting a given map type doesn't use is simply ignored).
 
 ### General
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `author` | `Unknown Author` | all | "Author: ..." line in the footer. |
-| `date` | `auto` | all | `auto` -> today's date (ISO); or set an explicit string, e.g. `2026-08-31`. |
-| `title` | *(empty)* | all | Figure title. Left blank, no title is drawn and the map reclaims that space. |
-| `subtitle` | *(empty)* | all | Smaller line under the title. Only shown if `title` is also set. |
-| `notes` | `[]` | all | Comma-separated cell -> list of extra free-text lines appended to the footer. |
-| `attribution.text` | `© OpenStreetMap (OSM)` | all | Copyright line in the footer. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `enabled` | basic | `true` | all | Set `false` (per map type) to skip rendering it entirely, without removing its sheet/settings from the workbook. |
+| `author` | basic | `Unknown Author` | all | "Author: ..." line in the footer. |
+| `date` | basic | `auto` | all | `auto` -> today's date (ISO); or set an explicit string, e.g. `2026-09-01`. |
+| `title` | basic | *(empty)* | all | Figure title. Left blank, no title is drawn and the map reclaims that space. |
+| `subtitle` | basic | *(empty)* | all | Smaller line under the title. Only shown if `title` is also set. |
+| `notes` | basic | `[]` | all | Comma-separated cell -> list of extra free-text lines appended to the footer. |
+| `attribution.text` | basic | `© OpenStreetMap (OSM)` | all | Copyright line in the footer. |
 
 ### `company.*` — footer logo
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `company.name` | *(empty)* | all | Stored but not currently drawn as text (only the logo image shows) — see Footer metadata. |
-| `company.logo_path` | *(empty)* | all | Path to a logo image, resolved relative to the workbook's own directory. |
-| `company.logo_scale` | `1.0` | all | Multiplier on the logo's footer size, anchored to the bottom-right corner (e.g. `1.5` = 50% bigger). |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `company.name` | basic | *(empty)* | all | Stored but not currently drawn as text (only the logo image shows) — see Footer metadata. |
+| `company.logo_path` | basic | *(empty)* | all | Path to a logo image, resolved relative to the workbook's own directory. |
+| `company.logo_scale` | basic | `1.0` | all | Multiplier on the logo's footer size, anchored to the bottom-right corner (e.g. `1.5` = 50% bigger). |
 
 ### `map.*` — page/canvas and data extent
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `map.crs` | `EPSG:4326` | all | Coordinate reference system used for plotting and the basemap. Any `pyproj`-recognized CRS works, including a projected/UTM zone, e.g. `EPSG:32631` (UTM 31N) — data is reprojected from its lon/lat source columns automatically, and the graticule switches to that CRS's native units (meters, for UTM); see Layout notes, including the UTM zone-mismatch warning. |
-| `map.figsize` | `13, 8` | all | Page size in inches, `width, height` (landscape). |
-| `map.dpi` | `300` | all | Resolution (dots per inch) of the exported PNG. |
-| `map.background_color` | `white` | all | Page/figure background color. |
-| `map.padding_fraction` | `0.12` | all | Extra breathing room padded around the data extent (fraction of the data span). |
-| `map.extent` | *(auto)* | all | `xmin, xmax, ymin, ymax` to force an exact extent instead of deriving one from the data. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `map.crs` | basic | `EPSG:4326` | all | Coordinate reference system used for plotting and the basemap. Any `pyproj`-recognized CRS works, including a projected/UTM zone, e.g. `EPSG:32631` (UTM 31N) — data is reprojected from its lon/lat source columns automatically, and the graticule switches to that CRS's native units (meters, for UTM); see Layout notes, including the UTM zone-mismatch warning. |
+| `map.figsize` | advanced | `13, 8` | all | Page size in inches, `width, height` (landscape). |
+| `map.dpi` | advanced | `300` | all | Resolution (dots per inch) of the exported PNG. |
+| `map.background_color` | advanced | `white` | all | Page/figure background color. |
+| `map.padding_fraction` | advanced | `0.12` | all | Extra breathing room padded around the data extent (fraction of the data span) — lower to zoom in tighter on the data, raise to zoom out and show more surrounding context. |
+| `map.extent` | advanced | *(auto)* | all | `xmin, xmax, ymin, ymax` to force an exact extent instead of deriving one from the data. |
 
 ### `basemap.*` — OpenStreetMap/XYZ tile layer
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `basemap.show` | `true` | all | Toggle the basemap on/off. |
-| `basemap.provider` | `OpenStreetMap.Mapnik` | all | Dotted path into `contextily.providers`, e.g. `CartoDB.Positron`, `Esri.WorldGrayCanvas`. |
-| `basemap.zoom` | `auto` | all | Tile zoom level; leave `auto` or set a fixed integer for explicit control. |
-| `basemap.zoom_adjust` | `1` | all | Bumps the auto-computed zoom level up by this many levels for sharper tiles (each `+1` ~doubles detail); `0` = contextily's own auto choice as-is. Also applies to the inset map's basemap. |
-| `basemap.alpha` | `1.0` | all | Basemap opacity, `0`-`1`. |
-| `basemap.headers` | `User-Agent: mapmaker-tuhh/1.0 (...)` | all | HTTP headers sent with tile requests — OSM requires a descriptive `User-Agent` or it silently serves a "blocked" placeholder tile. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `basemap.show` | basic | `true` | all | Toggle the basemap on/off. |
+| `basemap.provider` | basic | `OpenStreetMap.Mapnik` | all | Dotted path into `contextily.providers`, e.g. `CartoDB.Positron`/`Esri.WorldGrayCanvas` for a muted look, or `Esri.WorldShadedRelief`/`OpenTopoMap`/`Esri.WorldTopoMap` for terrain/relief — see Basemap notes. |
+| `basemap.zoom` | advanced | `auto` | all | Tile zoom level; leave `auto` or set a fixed integer for explicit control. |
+| `basemap.zoom_adjust` | advanced | `1` | all | Bumps the auto-computed zoom level up by this many levels for sharper tiles (each `+1` ~doubles detail); `0` = contextily's own auto choice as-is. Also applies to the inset map's basemap. |
+| `basemap.alpha` | advanced | `1.0` | all | Basemap opacity, `0`-`1`. |
+| `basemap.headers.User-Agent` | advanced | `mapmaker-tuhh/1.0 (...)` | all | HTTP header sent with tile requests — OSM requires a descriptive `User-Agent` or it silently serves a "blocked" placeholder tile. Replace the contact email before heavy/production use. |
+| `basemap.interpolation` | advanced | `bilinear` | all | How the basemap's fixed-resolution tile pixels are resampled up to print size; try `lanczos` for crisper-looking tile text/lines — see Basemap notes. |
 
 ### `graticule.*` — coordinate grid ticks
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `graticule.show` | `true` | all | Toggle the coordinate grid/ticks on/off. |
-| `graticule.n_ticks` | `5` | all | Approximate number of tick/cross lines per axis; shared fallback for both axes when `n_ticks_x`/`n_ticks_y` aren't set. |
-| `graticule.n_ticks_x` | *(none)* | all | Horizontal-axis (longitude) tick density, independent of the vertical axis. Falls back to `graticule.n_ticks` if unset. |
-| `graticule.n_ticks_y` | *(none)* | all | Vertical-axis (latitude) tick density, independent of the horizontal axis. Falls back to `graticule.n_ticks` if unset. |
-| `graticule.format` | `decimal` | all | `decimal` (e.g. `5.90°`) or `dms` (degrees/minutes/seconds, e.g. `5°54'00.0"`). |
-| `graticule.hemisphere_labels` | `true` | all | `true` appends `E`/`N`/`W`/`S`; `false` drops the letter and keeps a `-` sign for west/south instead. |
-| `graticule.fontsize` | `10` | all | Tick label font size. |
-| `graticule.color` | `0.35` | all | Tick/cross mark color. |
-| `graticule.linewidth` | `0.6` | all | Tick/cross mark line width. |
-| `graticule.frame` | `true` | all | Draw the black frame/spines around the map panel. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `graticule.show` | basic | `true` | all | Toggle the coordinate grid/ticks on/off. |
+| `graticule.n_ticks` | advanced | `5` | all | Approximate number of tick/cross lines per axis; shared fallback for both axes when `n_ticks_x`/`n_ticks_y` aren't set. |
+| `graticule.n_ticks_x` | advanced | *(none)* | all | Horizontal-axis tick density, independent of the vertical axis. Falls back to `graticule.n_ticks` if unset. |
+| `graticule.n_ticks_y` | advanced | *(none)* | all | Vertical-axis tick density, independent of the horizontal axis. Falls back to `graticule.n_ticks` if unset. |
+| `graticule.format` | advanced | `decimal` | all | `decimal` (e.g. `5.90°`) or `dms` (degrees/minutes/seconds, e.g. `5°54'00.0"`). Only applies when `map.crs` is geographic — a projected CRS like UTM always shows native-unit ticks instead. |
+| `graticule.hemisphere_labels` | advanced | `true` | all | `true` appends `E`/`N`/`W`/`S`; `false` drops the letter and keeps a `-` sign for west/south instead. |
+| `graticule.fontsize` | advanced | `10` | all | Tick label font size. |
+| `graticule.color` | advanced | `0.35` | all | Tick/cross mark color. |
+| `graticule.linewidth` | advanced | `0.6` | all | Tick/cross mark line width. |
+| `graticule.frame` | advanced | `true` | all | Draw the black frame/spines around the map panel. |
 
 ### `legend.*` / `scalebar.*` / `north_arrow.*` — chrome in the footer/map
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `legend.show` | `true` | all | Toggle the legend panel on/off. |
-| `legend.title` | `Legend` | all | Legend panel heading. |
-| `scalebar.show` | `true` | all | Toggle the scale bar on/off. |
-| `scalebar.units` | `auto` | all | `auto` (m below 1 km, else km), or force `m`/`km`. |
-| `scalebar.length_fraction` | `0.55` | all | Target fraction of the scale bar panel's width the bar should roughly fill before rounding to a nice number. |
-| `north_arrow.show` | `true` | all | Toggle the compass rose on/off. |
-| `north_arrow.location` | `lower right` | all | Corner inside the map frame: `upper left`/`upper right`/`lower left`/`lower right`. |
-| `north_arrow.size` | `0.045` | all | Arrow size, as a fraction of the map panel. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `legend.show` | basic | `true` | all | Toggle the legend panel on/off. |
+| `legend.title` | basic | `Legend` | all | Legend panel heading. |
+| `scalebar.show` | basic | `true` | all | Toggle the scale bar on/off. |
+| `scalebar.units` | advanced | `auto` | all | `auto` (m below 1 km, else km), or force `m`/`km`. |
+| `scalebar.length_fraction` | advanced | `0.55` | all | Target fraction of the scale bar panel's width the bar should roughly fill before rounding to a nice number. |
+| `north_arrow.show` | basic | `true` | all | Toggle the compass rose on/off. |
+| `north_arrow.location` | advanced | `lower right` | all | Corner inside the map frame: `upper left`/`upper right`/`lower left`/`lower right`. |
+| `north_arrow.size` | advanced | `0.045` | all | Arrow size, as a fraction of the map panel. |
 
 ### `inset_map.*` — overview inset
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `inset_map.show` | `true` | all | Toggle the overview inset on/off. |
-| `inset_map.location` | `lower left` | all | Corner inside the map frame (same 4 options as `north_arrow.location`). Pick a corner empty of data — the inset is opaque and covers anything beneath it. |
-| `inset_map.size` | `0.28` | all | Inset size as a fraction of the map panel. |
-| `inset_map.zoom_out_factor` | `8` | all | How many times wider/taller the inset's view is than the main map's extent. |
-| `inset_map.bbox_edgecolor` | `red` | all | Color of the ROI bounding box drawn on the inset. |
-| `inset_map.bbox_linewidth` | `2.2` | all | Line width of that ROI bounding box. |
-| `inset_map.min_bbox_frac` | `0.05` | all | Floors the ROI box to at least this fraction of the inset's width/height, so it stays visible at a large `zoom_out_factor`. The demo workbook raises this to `0.12` for turbines and `0.08` for grid_cells, since their bigger `zoom_out_factor` would otherwise shrink the true ROI box to a barely-visible sliver — raise it further (or per map type) if it's still too small for your own data. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `inset_map.show` | basic | `true` | all | Toggle the overview inset on/off. |
+| `inset_map.location` | advanced | `lower left` | all | Corner inside the map frame (same 4 options as `north_arrow.location`). Pick a corner empty of data — the inset is opaque and covers anything beneath it. |
+| `inset_map.size` | advanced | `0.28` | all | Inset size as a fraction of the map panel. |
+| `inset_map.zoom_out_factor` | advanced | `8` | all | How many times wider/taller the inset's view is than the main map's extent. |
+| `inset_map.bbox_edgecolor` | advanced | `red` | all | Color of the ROI bounding box drawn on the inset. |
+| `inset_map.bbox_linewidth` | advanced | `2.2` | all | Line width of that ROI bounding box. |
+| `inset_map.min_bbox_frac` | advanced | `0.05` | all | Floors the ROI box to at least this fraction of the inset's width/height, so it stays visible at a large `zoom_out_factor`. The demo raises this per map type where a bigger `zoom_out_factor` would otherwise shrink the box to a barely-visible sliver. |
 
 ### `reference_point.*` — single named point (grid_cells only)
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `reference_point.show` | `false` | grid_cells | Toggle the reference point on/off. |
-| `reference_point.name` | *(empty)* | grid_cells | Fallback label, only used if the sheet has no matching `dataset = reference` row — normally the point's own `farm_name` row in `grid_cells` supplies the label instead (see Layout notes). |
-| `reference_point.lon` / `.lat` | *(none)* | grid_cells | Fallback coordinates, same rule — normally sourced from the sheet's `dataset = reference` row for the current farm. |
-| `reference_point.marker` | `o` | grid_cells | Marker shape, any matplotlib marker code. |
-| `reference_point.color` | `#d62728` | grid_cells | Marker color. |
-| `reference_point.size` | `70` | grid_cells | Marker size. |
-| `reference_point.label_fontsize` | `9` | grid_cells | Font size of the name label. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `reference_point.show` | basic | `false` | grid_cells | Toggle the reference point on/off. |
+| `reference_point.name` | advanced | *(empty)* | grid_cells | Fallback label, only used if the sheet has no matching `dataset = reference` row — normally the point's own `farm_name` row in `grid_cells` supplies the label instead (see Layout notes). |
+| `reference_point.lon` / `.lat` | advanced | *(none)* | grid_cells | Fallback coordinates, same rule — normally sourced from the sheet's `dataset = reference` row for the current farm. |
+| `reference_point.marker` | advanced | `o` | grid_cells | Marker shape, any matplotlib marker code. |
+| `reference_point.color` | advanced | `#d62728` | grid_cells | Marker color. |
+| `reference_point.size` | advanced | `70` | grid_cells | Marker size. |
+| `reference_point.label_fontsize` | advanced | `9` | grid_cells | Font size of the name label. |
 
 ### `footer.*` — footer strip layout
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `footer.show` | `true` | all | Toggle the whole footer strip on/off. |
-| `footer.height_fraction` | `0.09` | all | How tall the footer band is, as a fraction of the page. |
-| `footer.column_widths` | `1.0, 1.3, 1.4, 2.1` | all | Relative widths of the legend / scale bar / CRS / date-author-copyright+logo columns. |
-| `footer.fontsize` | `8` | all | Footer text size. |
-| `footer.text_color` | `0.15` | all | Footer text color. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `footer.show` | basic | `true` | all | Toggle the whole footer strip on/off. |
+| `footer.height_fraction` | advanced | `0.09` | all | How tall the footer band is, as a fraction of the page. Raise it if your legend has many entries (e.g. `style.farm_colors` giving every farm its own row) — the demo raises `wind_farms` to `0.24` for exactly this reason. |
+| `footer.column_widths` | advanced | `1.0, 1.3, 1.4, 2.1` | all | Relative widths of the legend / scale bar / CRS / date-author-copyright+logo columns. |
+| `footer.fontsize` | advanced | `8` | all | Footer text size. |
+| `footer.text_color` | advanced | `0.15` | all | Footer text color. |
 
 ### `export.*` — output file
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `export.output_dir` | `../output` | all | Output folder, resolved relative to the workbook's own directory. |
-| `export.filename` | *(empty)* | all | Left empty, defaults to `<map_type>.png` (or `<map_type>_<farm-slug>.png` per auto-split turbine map). |
-| `export.transparent` | `false` | all | Export with a transparent background instead of `map.background_color`. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `export.output_dir` | advanced | `../output` | all | Output folder, resolved relative to the workbook's own directory. |
+| `export.filename` | basic | *(empty)* | all | Left empty, defaults to `<map_type>.png` (or `<map_type>_<farm-slug>.png` per auto-split map). |
+| `export.transparent` | advanced | `false` | all | Export with a transparent background instead of `map.background_color`. |
 
 ### `data.*` — which rows to plot
 
-| Key | Default | Applies to | What it does |
-|---|---|---|---|
-| `data.selected_farm` | *(none)* | turbines, grid_cells | Pin the render to one `farm_name` instead of auto-rendering one map per farm. |
-| `data.selected_datasets` | *(none)* | grid_cells | Comma-separated list of `dataset` values to include; unset renders every dataset present. |
+| Key | Sheet | Default | Applies to | What it does |
+|---|---|---|---|---|
+| `data.selected_farm` | advanced | *(none)* | turbines, grid_cells | Pin the render to one `farm_name` instead of auto-rendering one map per farm. |
+| `data.selected_datasets` | advanced | *(none)* | grid_cells | Comma-separated list of `dataset` values to include; unset renders every dataset present. |
 
 ### `style.*` — per-map-type appearance (no shared defaults; each map type reads its own keys)
 
-**`wind_farms`:**
+**`wind_farms`** (all in `settings_basic`):
 
 | Key | Default | What it does |
 |---|---|---|
 | `style.marker` | `o` | Marker shape, any matplotlib marker code (`o` circle, `D` diamond, `^` triangle, ...). |
 | `style.color` | `#2166ac` | Marker color used when there's no `status` column (or for statuses/farms missing from `status_colors`/`farm_colors`). |
 | `style.status_colors.<status>` | *(none)* | Per-status color, only used if the `wind_farms` sheet has a `status` column, e.g. `style.status_colors.Operational = #2ca25f`. Ignored if `farm_colors` is set (see below). |
-| `style.farm_colors.<name>` | *(none)* | Per-farm color, keyed by the farm's own `name` — gives each wind farm its own distinct color and its own legend entry, overriding `status`-based grouping entirely once any row is set. E.g. `style.farm_colors.Nordsee Alpha = #e6194B`. With many farms this needs a taller `footer.height_fraction` to fit every legend entry — see Layout notes. |
+| `style.farm_colors.<name>` | *(none)* | Per-farm color, keyed by the farm's own `name` — gives each wind farm its own distinct color and its own legend entry, overriding `status`-based grouping entirely once any row is set. E.g. `style.farm_colors.Nordsee Alpha = #e6194B`. With many farms this needs a taller `footer.height_fraction` to fit every legend entry (see Layout notes) — the demo enables this for all 10 farms. |
 | `style.legend_labels.<status-or-name>` | *(none)* | Overrides one legend entry's displayed text — keyed by `status` value normally, or by farm `name` when `farm_colors` is in use — without changing its color/grouping. E.g. `style.legend_labels.Nordsee Alpha = Nordsee Alpha (flagship)`. |
 | `style.size_field` | `capacity_mw` | Optional numeric column that scales marker size; omit the column to fall back to a fixed size. |
 | `style.base_marker_size` | `45` | Base marker size before size-field scaling. |
@@ -249,19 +272,22 @@ simply ignored).
 | `style.declutter_labels` | `true` | Reorient a label around its point (instead of a fixed spot) if needed to avoid overlapping another label — never dropped (see Layout notes). Farms are placed in `size_field` order (biggest first) so, when it's crowded, the more prominent farms get first pick of the tidiest spot. |
 | `style.legend_label` | `Wind Farm` | Legend entry label used when there's no `status` column and `farm_colors` isn't set. |
 
-**`turbines`:**
+**`turbines`** (all in `settings_basic`):
 
 | Key | Default | What it does |
 |---|---|---|
 | `style.marker` | `o` | Marker shape. |
-| `style.color` | `#2166ac` | Marker color (uniform — turbines don't have a status/category split). |
+| `style.color` | `#2166ac` | Uniform marker color, used when `color_field` isn't set. |
 | `style.marker_size` | `55` | Marker size. |
 | `style.label_points` | `true` | Draw each turbine's `turbine_id` next to its point. |
 | `style.label_fontsize` | `8` | Point label font size. |
 | `style.declutter_labels` | `true` | Same overlap-avoiding reorientation as `wind_farms` above, in `turbine_id` order. |
-| `style.legend_label` | *(the split's `farm_name`, else `Turbine`)* | Legend entry label. An explicit value here always wins; otherwise it defaults to the map's own wind farm name (see Map types) so a split-per-farm turbine map doesn't just say "Turbine" in every legend. |
+| `style.color_field` | *(none)* | Column to color turbines by instead of one uniform color — any column works, numeric or text (e.g. a `turbine_type` column, or reusing `rotor_diameter_m`'s own values categorically). Each distinct value gets its own color and legend entry. |
+| `style.category_colors.<value>` | *(none)* | Explicit color for one `color_field` category. Any category left out still gets colored automatically from a built-in colorblind-safe palette, so `color_field` works with zero color configuration too — the demo leaves one of its three turbine types unlisted to prove this. |
+| `style.legend_labels.<value>` | *(none)* | Renames one `color_field` category's legend text without changing its color. |
+| `style.legend_label` | *(the split's `farm_name`, else `Turbine`)* | Legend entry label used only when `color_field` isn't set. An explicit value here always wins; otherwise it defaults to the map's own wind farm name (see Map types) so a split-per-farm turbine map doesn't just say "Turbine" in every legend. |
 
-**`grid_cells`:**
+**`grid_cells`** (all in `settings_basic`):
 
 | Key | Default | What it does |
 |---|---|---|
@@ -270,26 +296,28 @@ simply ignored).
 | `style.dataset_colors.<dataset>` | `ERA5=#3182bd, MERRA2=#e6550d` | Per-dataset color. |
 | `style.legend_labels.<dataset>` | *(none)* | Overrides one dataset's legend text (default `"<dataset> grid"`, e.g. `"ERA5 grid"`) without changing its color/marker, e.g. `style.legend_labels.ERA5 = ERA5 (0.25°)`. |
 | `style.marker_size` | `14` | Marker size (shared across datasets). |
+| `style.label_points` | `true` | Draw a label next to any row whose `label` column is non-blank (see the `grid_cells` sheet); rows with a blank `label` show only their point, unlabeled. Has no effect if the sheet has no `label` column at all. |
+| `style.label_fontsize` | `7` | Point label font size. |
+| `style.declutter_labels` | `true` | Same overlap-avoiding reorientation as `wind_farms`/`turbines` above. |
 
-`scripts/generate_test_data.py`'s `CONFIG_ROWS` (built from `COMMON_SETTINGS` +
-`PER_TYPE_SETTINGS`) is a complete worked example of all of the above, with every
-common setting given its own explicit, independently-toggleable row per map type; and
-`mapmaker/config.py`'s `DEFAULTS` dict is the source of truth if this table and the
-code ever drift.
+`scripts/generate_test_data.py`'s `BASIC_ROWS`/`ADVANCED_ROWS` are a complete worked
+example of every key above, each with its own description, and `mapmaker/config.py`'s
+`DEFAULTS` dict is the source of truth if this table and the code ever drift.
 
 ## Layout notes
 
-- **Point labels decluttered automatically** (`wind_farms`/`turbines`, `style.declutter_labels`,
-  default `true`): every point still gets a label — none are ever dropped. Instead,
-  `render.py::_place_labels` tries a ring of 8 candidate placements around each point (N/S/E/W
-  and the diagonals), estimating each candidate's on-page bounding box from the map panel's
-  real rendered pixel size (like the scale bar does), and uses the first one that doesn't
-  overlap an already-placed label or the inset map; if every candidate would overlap something,
-  it falls back to whichever candidate overlaps the least. Labels are placed in priority order
-  (wind farms: biggest `size_field` first; turbines: sheet order), so on a crowded map the
-  higher-priority points get first pick of the tidiest spot. Set `style.declutter_labels: false`
-  to always use the single default placement (upper-right of the point) instead, ignoring
-  overlaps entirely.
+- **Point labels decluttered automatically** (`wind_farms`/`turbines`/`grid_cells`,
+  `style.declutter_labels`, default `true`): every point still gets a label — none are
+  ever dropped. Instead, `render.py::_place_labels` tries a ring of 8 candidate
+  placements around each point (N/S/E/W and the diagonals), estimating each candidate's
+  on-page bounding box from the map panel's real rendered pixel size (like the scale
+  bar does), and uses the first one that doesn't overlap an already-placed label or the
+  inset map; if every candidate would overlap something, it falls back to whichever
+  candidate overlaps the least. Labels are placed in priority order (wind farms:
+  biggest `size_field` first; turbines/grid_cells: sheet order), so on a crowded map the
+  higher-priority points get first pick of the tidiest spot. Set
+  `style.declutter_labels: false` to always use the single default placement
+  (upper-right of the point) instead, ignoring overlaps entirely.
 - **Outer page border with uniform margins.** A thin rectangle frames the
   whole page (`render.py::_add_page_border`). Margins are defined in *inches*
   (`OUTER_MARGIN_IN`, `SIDE_PAD_IN`, `BOTTOM_PAD_IN`, `TITLE_BAND_IN` at the
@@ -307,10 +335,11 @@ code ever drift.
   the actual rendered pixel width of the map panel), not just a visual guess.
 - **Footer layout is user-configurable** and kept close to the bottom border
   by default (no tall empty strip below it): `footer.height_fraction`
-  controls how tall the footer band is (default `0.09`; the wind-farm map's
-  3-entry legend is the tallest content across the demo configs and is what
-  sets the practical floor — go lower only if your legends/text are shorter),
-  and `footer.column_widths` (default `[1.0, 1.3, 1.4, 2.1]`) controls the
+  controls how tall the footer band is (default `0.09`, enough for a short
+  legend; the demo raises it to `0.24` for `wind_farms` since `style.farm_colors`
+  gives all 10 farms their own legend entry — raise it similarly whenever a
+  legend has many entries, e.g. many `status_colors`/`farm_colors`/`color_field`
+  categories), and `footer.column_widths` (default `[1.0, 1.3, 1.4, 2.1]`) controls the
   relative width of the legend / scale bar / CRS / date-author-copyright+logo
   columns. All four columns bottom-align to the page's bottom border, like a
   row of footnotes — any leftover slack ends up as space above the footer
@@ -318,8 +347,10 @@ code ever drift.
 - **Every chrome element can be switched off independently**: `basemap.show`,
   `graticule.show`, `legend.show`, `scalebar.show`, `north_arrow.show`,
   `inset_map.show`, and `footer.show` are all `true`/`false` toggles — e.g.
-  add a `inset_map.show = false` row in `config` to drop the overview inset
-  entirely with no other changes needed.
+  add an `inset_map.show = false` row to drop the overview inset entirely
+  with no other changes needed. The same pattern extends to whole map types:
+  `enabled = false` (scoped to `wind_farms`/`turbines`/`grid_cells`) skips
+  rendering that map type altogether, without touching its sheet or settings.
 - **North arrow and the inset overview map sit inside the map frame**, each in
   a configurable corner (`north_arrow.location`, `inset_map.location`). Being
   opaque, whichever corner they occupy visually covers any data underneath —
@@ -327,7 +358,7 @@ code ever drift.
   automatically, but the point marker itself can still be covered if it falls
   deep inside that corner. Pick a corner that's empty for your dataset (see
   the `wind_farms`/`turbines` rows in `scripts/generate_test_data.py`'s
-  `CONFIG_ROWS`, which both do this); for data that fills its whole bounding
+  `ADVANCED_ROWS`, which both do this); for data that fills its whole bounding
   box (e.g. a full turbine grid or a wall-to-wall reanalysis grid), add extra
   `map.padding_fraction` and/or shrink `inset_map.size` so real corners stay
   clear. **Inset size is fully user-configurable** via `inset_map.size` (a
@@ -344,7 +375,7 @@ code ever drift.
 - **Graticule** draws small `+` cross ticks at each grid intersection (not
   full lines across the map) with coordinate labels mirrored on all four
   sides of the frame, matching a classic QGIS print-layout grid. Horizontal
-  (longitude) and vertical (latitude) tick density can be set independently via
+  and vertical tick density can be set independently via
   `graticule.n_ticks_x`/`graticule.n_ticks_y` — useful when the map panel is much
   wider than it is tall (or vice versa) and one shared `n_ticks` would otherwise
   leave one axis too sparse or the other too crowded; either left unset falls back
@@ -374,12 +405,12 @@ code ever drift.
     switch to that zone, or fall back to a non-UTM CRS (`EPSG:3857` or `EPSG:4326`) if
     the data genuinely spans multiple zones.
 - **`reference_point` (grid_cells maps only)** marks the wind farm an ERA5/MERRA2
-  comparison is centered on: a single named circle point. Toggle/style it via `config`
-  rows scoped to `grid_cells` (`reference_point.show`, `.marker`, `.color`, `.size`,
-  `.label_fontsize` — `show` defaults to `false`, so it's omitted unless you turn it on).
-  Its **position and label come from the `grid_cells` sheet itself**, not `config`: add
-  one row per farm with `dataset` set to `reference` (a reserved value, never plotted as
-  a grid cell) alongside that farm's ERA5/MERRA2 rows, e.g.:
+  comparison is centered on: a single named circle point. Toggle/style it via
+  `reference_point.show`/`.marker`/`.color`/`.size`/`.label_fontsize` (`show` defaults
+  to `false`, so it's omitted unless you turn it on). Its **position and label come
+  from the `grid_cells` sheet itself**, not settings: add one row per farm with
+  `dataset` set to `reference` (a reserved value, never plotted as a grid cell)
+  alongside that farm's ERA5/MERRA2 rows, e.g.:
   ```
   farm_name       dataset     cell_id   lon    lat
   Nordsee Alpha   reference             6.35   54.65
@@ -392,7 +423,7 @@ code ever drift.
   never leaks into another farm's extent. It's included in the map's extent calculation,
   so the frame adjusts to keep it visible even if it sits near the edge of the grid.
   For a workbook with no `farm_name` column at all (a single combined grid map), you can
-  instead set `reference_point.name`/`.lon`/`.lat` directly in `config` as a fallback —
+  instead set `reference_point.name`/`.lon`/`.lat` directly in settings as a fallback —
   used only when the sheet has no matching `reference` row.
 
 ## Footer metadata
@@ -402,7 +433,7 @@ date, copyright (OSM attribution), and coordinate reference system** — plus
 the legend and scale bar. The plumbing for more supports it without any code
 changes needed:
 
-- **`notes`** — a `config` row with key `notes` and a comma-separated value is parsed
+- **`notes`** — a settings row with key `notes` and a comma-separated value is parsed
   as a list; each entry is appended to the date/author/copyright block. E.g. a row
   `key=notes, value=Internal draft -- not for distribution`.
 - **`extra_footer_lines`** — `_finalize()` in `mapmaker/render.py` and
@@ -411,7 +442,7 @@ changes needed:
   showing where stats like farm count, turbine count, or total capacity used
   to be assembled (`extra = [...]`) before being passed through; reinstate
   that pattern for any per-map dataset stats you want back in the footer.
-- **`company.name`** — set via `config` but intentionally not rendered as text
+- **`company.name`** — set via settings but intentionally not rendered as text
   right now (only `company.logo_path` shows, as the logo image). Add a line
   for it in `elements.add_footer`'s `lines` list if you want the company name
   spelled out as well as shown via the logo.
@@ -430,7 +461,12 @@ changes needed:
   your own before heavy/production use.
 - Swap `basemap.provider` to any dotted path into `contextily.providers`
   (e.g. `CartoDB.Positron`, `Esri.WorldGrayCanvas`) for a different look.
-- **Improving resolution**: `basemap.zoom_adjust` (default `1`) bumps the tile
+- **Terrain/relief basemaps** work the same way, no code change needed — set
+  `basemap.provider` to `Esri.WorldShadedRelief` (clean hillshade), `OpenTopoMap`
+  (colored elevation + contours + roads/labels), or `Esri.WorldTopoMap` (topographic
+  map style); all three are free and need no API key, confirmed working end-to-end.
+- **Improving basemap resolution** (getting more real detail, e.g. actual road
+  labels visible at a given zoom): `basemap.zoom_adjust` (default `1`) bumps the tile
   zoom level up from contextily's own auto-computed choice — each `+1` roughly
   doubles the tile detail/resolution in each dimension (more, smaller tiles
   covering the same extent) at the cost of more tiles to download. Raise it
@@ -442,14 +478,22 @@ changes needed:
   detailed tiles the way `zoom_adjust` does. You can also set `basemap.zoom`
   directly to a fixed integer (instead of `auto`) if you want explicit control
   over the tile zoom level rather than an auto+adjust offset.
+- **Improving basemap image/text *sharpness*** (as opposed to more detail being
+  visible at all): this is a resampling issue, not a detail issue — OSM tiles are a
+  fixed 256x256px raster, so displaying them at a large print size/DPI stretches
+  those pixels, and matplotlib's `interpolation` mode controls how that stretch is
+  smoothed. `basemap.interpolation` (default `bilinear`) can be set to `lanczos` for
+  a crisper look at hard edges/text (at some risk of ringing artifacts); `zoom_adjust`
+  above still matters more for genuine sharpness, since fetching a higher-resolution
+  tile in the first place beats resampling the same one more cleverly.
 
 ## Code layout
 
-`mapmaker/config.py` loads the workbook's `config` sheet into per-map-type
-settings dicts (`load_workbook_configs`), merged over the built-in `DEFAULTS`.
-`mapmaker/data_io.py` reads the `wind_farms`/`turbines`/`grid_cells` sheets into
-GeoDataFrames. `mapmaker/render.py` builds each figure as a 2-row GridSpec (map
-row, footer row) inside an outer bordered page. The footer splits into legend /
-scale bar / CRS / date-author-copyright+logo panels. `mapmaker/elements.py` holds
-the reusable chrome: graticule/ticks, north arrow, scale bar, inset map, footer
-panels.
+`mapmaker/config.py` loads the workbook's `settings_basic`/`settings_advanced` (and/or
+a single `config`) sheets into per-map-type settings dicts (`load_workbook_configs`),
+merged over the built-in `DEFAULTS`. `mapmaker/data_io.py` reads the
+`wind_farms`/`turbines`/`grid_cells` sheets into GeoDataFrames. `mapmaker/render.py`
+builds each figure as a 2-row GridSpec (map row, footer row) inside an outer bordered
+page. The footer splits into legend / scale bar / CRS / date-author-copyright+logo
+panels. `mapmaker/elements.py` holds the reusable chrome: graticule/ticks, north
+arrow, scale bar, inset map, footer panels.

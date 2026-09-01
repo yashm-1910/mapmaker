@@ -58,6 +58,16 @@ def _warn_utm_zone_mismatch(crs, gdf_4326: gpd.GeoDataFrame) -> None:
             f"EPSG:4326) if the data genuinely spans multiple UTM zones."
         )
 
+
+# Fallback palette (Okabe-Ito, colorblind-safe) cycled through when a categorical
+# coloring key (e.g. turbines' style.color_field) has more distinct values than
+# style.category_colors names explicitly -- so "color by some column" works with zero
+# color configuration, not just as an override mechanism.
+_DEFAULT_CATEGORY_PALETTE = [
+    "#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7",
+    "#56B4E9", "#F0E442", "#999999", "#882255", "#44AA99",
+]
+
 # ---------------------------------------------------------------------------
 # Shared figure / layout plumbing
 # ---------------------------------------------------------------------------
@@ -328,6 +338,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
                 zoom_adjust=basemap_cfg.get("zoom_adjust", 0) or None,
                 alpha=basemap_cfg.get("alpha", 1.0), attribution=False,
                 headers=basemap_cfg.get("headers"),
+                interpolation=basemap_cfg.get("interpolation", "bilinear"),
             )
         except Exception as e:  # pragma: no cover - network dependent
             warnings.warn(f"Basemap fetch failed ({e}); continuing without a basemap.")
@@ -359,6 +370,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             basemap_provider=provider, bbox_edgecolor=ins.get("bbox_edgecolor", "red"),
             bbox_linewidth=ins.get("bbox_linewidth", 2.2), basemap_headers=basemap_cfg.get("headers"),
             basemap_zoom_adjust=basemap_cfg.get("zoom_adjust", 0),
+            basemap_interpolation=basemap_cfg.get("interpolation", "bilinear"),
             min_bbox_frac=ins.get("min_bbox_frac", 0.05),
         )
 
@@ -494,15 +506,38 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
     marker_color = style.get("color", "#2166ac")
     marker_size = style.get("marker_size", 55)
     marker = style.get("marker", "o")
+    legend_labels = style.get("legend_labels", {})
     # An explicit style.legend_label always wins; otherwise the legend names the wind
     # farm itself (more useful than a generic "Turbine" once maps are split per farm)
-    # falling back to "Turbine" only if there's no farm_name to use either.
+    # falling back to "Turbine" only if there's no farm_name to use either. Only used
+    # when color_field isn't set -- with it, each category gets its own legend entry
+    # instead (see below).
     label = style.get("legend_label") or farm_name or "Turbine"
 
-    ax.scatter(gdf.geometry.x, gdf.geometry.y, s=marker_size, marker=marker, color=marker_color,
-               edgecolor="black", linewidth=0.6, zorder=6)
-    handles = [Line2D([0], [0], marker=marker, color="w", markerfacecolor=marker_color,
-                       markeredgecolor="black", markersize=8, label=label)]
+    # style.color_field names any column (numeric or text -- e.g. a turbine type/model,
+    # or reusing rotor_diameter_m/capacity_mw categorically) to color turbines by,
+    # instead of one uniform color. Each distinct value gets its own color (explicit
+    # style.category_colors.<value> if given, else the next color from a built-in
+    # colorblind-safe palette -- so it works with zero color config too) and its own
+    # legend entry (its own text, or style.legend_labels.<value> to rename it).
+    color_field = style.get("color_field")
+    if color_field and color_field in gdf.columns:
+        category_colors = style.get("category_colors", {})
+        categories = sorted(gdf[color_field].dropna().unique(), key=str)
+        handles = []
+        for i, category in enumerate(categories):
+            sub = gdf[gdf[color_field] == category]
+            color = category_colors.get(category, _DEFAULT_CATEGORY_PALETTE[i % len(_DEFAULT_CATEGORY_PALETTE)])
+            ax.scatter(sub.geometry.x, sub.geometry.y, s=marker_size, marker=marker, color=color,
+                       edgecolor="black", linewidth=0.6, zorder=6)
+            handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,
+                                   markeredgecolor="black", markersize=8,
+                                   label=legend_labels.get(category, str(category))))
+    else:
+        ax.scatter(gdf.geometry.x, gdf.geometry.y, s=marker_size, marker=marker, color=marker_color,
+                   edgecolor="black", linewidth=0.6, zorder=6)
+        handles = [Line2D([0], [0], marker=marker, color="w", markerfacecolor=marker_color,
+                           markeredgecolor="black", markersize=8, label=label)]
 
     if style.get("label_points", True) and "turbine_id" in gdf.columns:
         label_fontsize = style.get("label_fontsize", 8)
@@ -575,6 +610,20 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
         handles.append(Line2D([0], [0], marker=marker, color="w", markerfacecolor=color,
                                markeredgecolor="black", markersize=7,
                                label=legend_labels.get(dataset, f"{dataset} grid")))
+
+    # Optional per-cell labels: only if the sheet has a `label` column at all (most grid
+    # maps have far too many cells to label every one); within that column, a blank cell
+    # simply leaves that one point unlabeled -- e.g. label just the handful of cells you
+    # care to call out, and leave the rest empty.
+    if "label" in gdf.columns and style.get("label_points", True):
+        label_fontsize = style.get("label_fontsize", 7)
+        extent_for_labels = _compute_extent(gdf, cfg, target_aspect)
+        items = [
+            (row.geometry.x, row.geometry.y, str(row["label"]).strip())
+            for _, row in gdf.iterrows() if pd.notna(row.get("label")) and str(row["label"]).strip()
+        ]
+        _place_labels(fig, ax, extent_for_labels, items, label_fontsize, cfg.get("inset_map", {}),
+                      declutter=style.get("declutter_labels", True))
 
     # Optional single reference point (e.g. the wind farm this grid comparison is
     # centered on), folded into the extent so the map frame accounts for it even if it

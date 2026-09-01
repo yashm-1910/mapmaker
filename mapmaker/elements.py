@@ -344,6 +344,7 @@ def add_inset_map(
     bbox_linewidth: float = 2.2,
     basemap_headers: dict | None = None,
     basemap_zoom_adjust: int = 0,
+    basemap_interpolation: str = "bilinear",
     min_bbox_frac: float = 0.05,
 ):
     """Add a small overview-map inset to `ax`, zoomed out `zoom_out_factor` times around the
@@ -378,7 +379,7 @@ def add_inset_map(
     if basemap_provider is not False and basemap_provider is not None:
         try:
             cx.add_basemap(axins, crs=crs, source=basemap_provider, attribution=False, headers=basemap_headers,
-                           zoom_adjust=basemap_zoom_adjust or None)
+                           zoom_adjust=basemap_zoom_adjust or None, interpolation=basemap_interpolation)
         except Exception as e:  # pragma: no cover - network dependent
             warnings.warn(f"Inset basemap fetch failed ({e}); using flat fill instead.")
             axins.set_facecolor("#dce6f2")
