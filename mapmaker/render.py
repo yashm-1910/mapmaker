@@ -339,6 +339,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
                 alpha=basemap_cfg.get("alpha", 1.0), attribution=False,
                 headers=basemap_cfg.get("headers"),
                 interpolation=basemap_cfg.get("interpolation", "bilinear"),
+                timeout=basemap_cfg.get("timeout", 15),
             )
         except Exception as e:  # pragma: no cover - network dependent
             warnings.warn(f"Basemap fetch failed ({e}); continuing without a basemap.")
@@ -371,6 +372,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             bbox_linewidth=ins.get("bbox_linewidth", 2.2), basemap_headers=basemap_cfg.get("headers"),
             basemap_zoom_adjust=basemap_cfg.get("zoom_adjust", 0),
             basemap_interpolation=basemap_cfg.get("interpolation", "bilinear"),
+            basemap_timeout=basemap_cfg.get("timeout", 15),
             min_bbox_frac=ins.get("min_bbox_frac", 0.05),
         )
 

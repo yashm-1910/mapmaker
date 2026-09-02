@@ -13,6 +13,16 @@ import pandas as pd
 
 MAP_TYPES = ["wind_farms", "turbines", "grid_cells"]
 
+# Friendly display names for the settings sheets' scope column -- purely cosmetic;
+# `MAP_TYPES` above (and data-sheet tab names, --map-type, output filenames) stay the
+# internal wind_farms/turbines/grid_cells identifiers everywhere else in the code.
+MAP_TYPE_LABELS: dict[str, str] = {
+    "wind_farms": "Portfolio Map",
+    "turbines": "Turbine Map",
+    "grid_cells": "ERA5/MERRA2 Map",
+}
+_LABEL_TO_MAP_TYPE: dict[str, str] = {label.lower(): mt for mt, label in MAP_TYPE_LABELS.items()}
+
 # ---------------------------------------------------------------------------
 # Built-in defaults. Any setting not present in the workbook's `config` sheet
 # falls back to this.
@@ -62,6 +72,12 @@ DEFAULTS: dict[str, Any] = {
         # artifacts on hard edges). Raising zoom_adjust helps more than this does, since it
         # fetches genuinely more detailed tiles instead of just resampling the same ones.
         "interpolation": "bilinear",
+        # contextily passes this straight to `requests.get(..., timeout=...)`; without it,
+        # a tile server that's slow, rate-limiting, or silently dropping requests (some
+        # providers -- notably OpenTopoMap -- throttle or block traffic from datacenter/cloud
+        # IP ranges) hangs the whole render indefinitely instead of failing over to a flat
+        # fill. Seconds per tile request; lower it for faster failover, raise it on a slow link.
+        "timeout": 15,
     },
     "graticule": {
         "show": True,
@@ -209,9 +225,12 @@ def load_workbook_configs(path: str | Path) -> dict[str, dict]:
     workbook (`wind_farms`, `turbines`, `grid_cells`), read from whichever of
     `CONFIG_SHEET_NAMES` are present. Each such sheet has the same three columns (a
     fourth, `description`, is allowed and ignored by the parser -- it's there purely
-    for a human reading the workbook): `scope` (blank/`*` = applies to every map type,
-    or one of the map type names to override just that one), `key` (a dotted path into
-    the settings, e.g. `footer.height_fraction`, `style.marker_size`), and `value`.
+    for a human reading the workbook): `Map` (blank/`*` = applies to every map type, or
+    a friendly map name from `MAP_TYPE_LABELS` -- e.g. "Portfolio Map" -- to override
+    just that one; the internal wind_farms/turbines/grid_cells identifiers are also
+    accepted for backward compatibility, as is the older `scope` column header), `key`
+    (a dotted path into the settings, e.g. `footer.height_fraction`, `style.marker_size`),
+    and `value`.
 
     Returns a dict {map_type: cfg}, in `MAP_TYPES` order, for whichever map types are
     present -- including one whose `enabled` setting resolves to `False`; the caller
@@ -234,8 +253,11 @@ def load_workbook_configs(path: str | Path) -> dict[str, dict]:
             if key is None or (isinstance(key, float) and pd.isna(key)) or not str(key).strip():
                 continue
             value = _parse_scalar(row.get("value"))
-            scope = row.get("scope")
+            scope = row.get("Map")
+            if scope is None or (isinstance(scope, float) and pd.isna(scope)):
+                scope = row.get("scope")  # older/single-sheet workbooks
             scope = str(scope).strip() if scope is not None and not pd.isna(scope) else ""
+            scope = _LABEL_TO_MAP_TYPE.get(scope.lower(), scope)
             target = scoped_overrides[scope] if scope in scoped_overrides else global_overrides
             _set_dotted(target, str(key).strip(), value)
 

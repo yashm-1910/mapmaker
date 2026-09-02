@@ -78,7 +78,7 @@ holds every sheet mapmaker needs:
   of e.g. `ERA5`/`MERRA2`) marks a named reference point rather than a grid cell — see
   `reference_point` in Layout notes.
 - **`settings_basic`** / **`settings_advanced`** — every rendering setting, as
-  `scope | key | value | description` rows. Both sheets share the same schema and are
+  `Map | key | value | description` rows. Both sheets share the same schema and are
   read together (a `config` sheet also still works, e.g. for a single-sheet workbook);
   splitting them is purely organizational:
   - **`settings_basic`** — what you'd plausibly change often: titles, author/date,
@@ -89,17 +89,20 @@ holds every sheet mapmaker needs:
     params, and which farm/dataset to render when you don't want the auto-split.
 
   Columns:
-  - `scope` — blank (or `*`) applies the setting to every map type; set it to
-    `wind_farms`, `turbines`, or `grid_cells` to override just that one map. **A
-    setting that's the same for every map type gets one global (blank-scope) row —
-    it isn't repeated per type.** Only settings that genuinely need to differ (or are
+  - `Map` — blank (or `*`) applies the setting to every map type; set it to
+    `Portfolio Map`, `Turbine Map`, or `ERA5/MERRA2 Map` to override just that one
+    (the older internal names — `wind_farms`, `turbines`, `grid_cells` — and an
+    older `scope` column header both still work, for backward compatibility). **A
+    setting that's the same for every map type gets one global (blank) row — it
+    isn't repeated per type.** Only settings that genuinely need to differ (or are
     inherently type-specific, like `style.*` or `export.filename`) get their own
-    scoped row per type; the scope mechanism still supports overriding literally any
-    key for any single map type, this just keeps the shipped example from cluttering
-    itself with redundant identical rows. Copy the pattern from
+    row per map type; the mechanism still supports overriding literally any key for
+    any single map type, this just keeps the shipped example from cluttering itself
+    with redundant identical rows. Copy the pattern from
     `scripts/generate_test_data.py`'s `BASIC_ROWS`/`ADVANCED_ROWS` for your own
     workbook: one row per setting, scoped only where the value actually needs to
-    differ.
+    differ (that script writes the internal names for readability and relabels
+    them to the friendly names above when it builds the sheet).
   - `key` — a dotted path into the settings, e.g. `footer.height_fraction`,
     `style.marker_size`, `basemap.provider`, `style.farm_colors.Nordsee Alpha`.
   - `value` — parsed automatically: `true`/`false` → boolean, a number → int/float,
@@ -130,8 +133,8 @@ rows (global or per map type) when you want one.
 Every `key` you can put in `settings_basic`/`settings_advanced`, grouped the same way
 as `mapmaker/config.py`'s `DEFAULTS`. "Sheet" shows where the shipped demo workbook
 puts that setting (purely a convention — either sheet works for any key); "Applies to"
-shows which map type(s) actually use it (global rows with a blank `scope` are read by
-every map type, but a setting a given map type doesn't use is simply ignored).
+shows which map type(s) actually use it (global rows with a blank `Map` column are read
+by every map type, but a setting a given map type doesn't use is simply ignored).
 
 ### General
 
@@ -169,12 +172,13 @@ every map type, but a setting a given map type doesn't use is simply ignored).
 | Key | Sheet | Default | Applies to | What it does |
 |---|---|---|---|---|
 | `basemap.show` | basic | `true` | all | Toggle the basemap on/off. |
-| `basemap.provider` | basic | `OpenStreetMap.Mapnik` | all | Dotted path into `contextily.providers`, e.g. `CartoDB.Positron`/`Esri.WorldGrayCanvas` for a muted look, or `Esri.WorldShadedRelief`/`OpenTopoMap`/`Esri.WorldTopoMap` for terrain/relief — see Basemap notes. |
+| `basemap.provider` | basic | `OpenStreetMap.Mapnik` | all | Dotted path into `contextily.providers`, e.g. `CartoDB.Positron`/`Esri.WorldGrayCanvas` for a muted look, or `Esri.WorldShadedRelief`/`OpenTopoMap`/`Esri.WorldTopoMap` for terrain/relief — see Basemap notes. A full `{x}`/`{y}`/`{z}` tile URL is also accepted and used as-is. |
 | `basemap.zoom` | advanced | `auto` | all | Tile zoom level; leave `auto` or set a fixed integer for explicit control. |
 | `basemap.zoom_adjust` | advanced | `1` | all | Bumps the auto-computed zoom level up by this many levels for sharper tiles (each `+1` ~doubles detail); `0` = contextily's own auto choice as-is. Also applies to the inset map's basemap. |
 | `basemap.alpha` | advanced | `1.0` | all | Basemap opacity, `0`-`1`. |
-| `basemap.headers.User-Agent` | advanced | `mapmaker-tuhh/1.0 (...)` | all | HTTP header sent with tile requests — OSM requires a descriptive `User-Agent` or it silently serves a "blocked" placeholder tile. Replace the contact email before heavy/production use. |
+| `basemap.headers.User-Agent` | advanced | `mapmaker-tuhh/1.0 (...)` | all | HTTP header sent with tile requests — OSM requires a descriptive `User-Agent` or it visibly renders a "blocked" placeholder tile. Replace the contact email before heavy/production use. |
 | `basemap.interpolation` | advanced | `bilinear` | all | How the basemap's fixed-resolution tile pixels are resampled up to print size; try `lanczos` for crisper-looking tile text/lines — see Basemap notes. |
+| `basemap.timeout` | advanced | `15` | all | Seconds to wait for a tile server before giving up on that tile and falling back to a flat fill — see Basemap notes. |
 
 ### `graticule.*` — coordinate grid ticks
 
@@ -349,8 +353,8 @@ example of every key above, each with its own description, and `mapmaker/config.
   `inset_map.show`, and `footer.show` are all `true`/`false` toggles — e.g.
   add an `inset_map.show = false` row to drop the overview inset entirely
   with no other changes needed. The same pattern extends to whole map types:
-  `enabled = false` (scoped to `wind_farms`/`turbines`/`grid_cells`) skips
-  rendering that map type altogether, without touching its sheet or settings.
+  `enabled = false` (scoped to `Portfolio Map`/`Turbine Map`/`ERA5/MERRA2 Map`)
+  skips rendering that map type altogether, without touching its sheet or settings.
 - **North arrow and the inset overview map sit inside the map frame**, each in
   a configurable corner (`north_arrow.location`, `inset_map.location`). Being
   opaque, whichever corner they occupy visually covers any data underneath —
@@ -456,15 +460,37 @@ changes needed:
 
 - Default provider is `OpenStreetMap.Mapnik`. Their tile server enforces a
   usage policy requiring a descriptive `User-Agent` (set under
-  `basemap.headers`) — without one it silently serves a "blocked" placeholder
-  tile instead of erroring. Replace the contact email in that header with
-  your own before heavy/production use.
+  `basemap.headers`) — without one it visibly renders an "Access blocked"
+  placeholder tile (not a silent failure, and not specific to any one
+  provider — it's OSM's own tile policy). Replace the contact email in that
+  header with your own before heavy/production use.
 - Swap `basemap.provider` to any dotted path into `contextily.providers`
-  (e.g. `CartoDB.Positron`, `Esri.WorldGrayCanvas`) for a different look.
+  (e.g. `CartoDB.Positron`, `Esri.WorldGrayCanvas`) for a different look. A
+  full tile URL template containing `{x}`/`{y}`/`{z}` also works directly
+  (e.g. a Mapbox/private tile URL with your own API key already in it) —
+  useful for **Google's terrain-hybrid tiles**: Google doesn't publish a
+  simple XYZ endpoint the way OSM/Carto/Esri do, so this only works via
+  Google's paid Maps Platform Tiles API (session-token auth, more involved
+  than one URL) or one of the well-known unofficial tile hosts
+  (`mt1.google.com/vt/lyrs=y&...`) that many hobby tools use — the
+  latter works technically but isn't an approved integration path per
+  Google's ToS, so it's not wired in or shipped as a demo default; point
+  `basemap.provider` at either yourself if you want it.
 - **Terrain/relief basemaps** work the same way, no code change needed — set
   `basemap.provider` to `Esri.WorldShadedRelief` (clean hillshade), `OpenTopoMap`
   (colored elevation + contours + roads/labels), or `Esri.WorldTopoMap` (topographic
   map style); all three are free and need no API key, confirmed working end-to-end.
+  Note that over low-relief terrain (e.g. the Dutch/German coast in the demo
+  data) `OpenTopoMap`'s hillshading is subtle and it can look close to plain
+  `OpenStreetMap.Mapnik` at a glance — that's the actual terrain, not a bug;
+  `Esri.WorldShadedRelief` makes the relief more visually obvious everywhere.
+- **If a basemap "just doesn't work"** (hangs rather than erroring): some free
+  tile providers throttle or silently drop requests from datacenter/cloud IPs,
+  and without a timeout that can hang the whole render forever instead of
+  falling back to a flat fill. `basemap.timeout` (default `15` seconds) caps
+  how long any single tile request waits before giving up and falling back —
+  lower it for faster failover, raise it only if you're on a genuinely slow
+  connection.
 - **Improving basemap resolution** (getting more real detail, e.g. actual road
   labels visible at a given zoom): `basemap.zoom_adjust` (default `1`) bumps the tile
   zoom level up from contextily's own auto-computed choice — each `+1` roughly

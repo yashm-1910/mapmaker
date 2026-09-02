@@ -323,9 +323,16 @@ def draw_scalebar_panel(
 
 
 def _resolve_provider(name: str | None):
-    """Resolve a dotted provider name (e.g. "CartoDB.Positron") to a contextily TileProvider."""
+    """Resolve `basemap.provider` to something contextily's `source=` accepts: a dotted path
+    (e.g. "CartoDB.Positron") into contextily.providers, or -- if it looks like a URL template
+    (contains "://" or an "{x}"/"{z}" placeholder) -- the literal string, passed straight
+    through to contextily as a custom XYZ tile source (e.g. a Mapbox/Google/private tile URL
+    with its own API key already embedded).
+    """
     if not name:
         return cx.providers.OpenStreetMap.Mapnik
+    if "://" in name or "{x}" in name or "{z}" in name:
+        return name
     obj = cx.providers
     for part in name.split("."):
         obj = getattr(obj, part)
@@ -345,6 +352,7 @@ def add_inset_map(
     basemap_headers: dict | None = None,
     basemap_zoom_adjust: int = 0,
     basemap_interpolation: str = "bilinear",
+    basemap_timeout: float = 15,
     min_bbox_frac: float = 0.05,
 ):
     """Add a small overview-map inset to `ax`, zoomed out `zoom_out_factor` times around the
@@ -379,7 +387,8 @@ def add_inset_map(
     if basemap_provider is not False and basemap_provider is not None:
         try:
             cx.add_basemap(axins, crs=crs, source=basemap_provider, attribution=False, headers=basemap_headers,
-                           zoom_adjust=basemap_zoom_adjust or None, interpolation=basemap_interpolation)
+                           zoom_adjust=basemap_zoom_adjust or None, interpolation=basemap_interpolation,
+                           timeout=basemap_timeout)
         except Exception as e:  # pragma: no cover - network dependent
             warnings.warn(f"Inset basemap fetch failed ({e}); using flat fill instead.")
             axins.set_facecolor("#dce6f2")
