@@ -31,7 +31,11 @@ farms/turbines and diamonds for the reanalysis grids.
 
 ## Setup
 
-Requires Python 3.10+. From the project root:
+Requires Python 3.10+. Two ways to get it running, depending on whether you're
+developing mapmaker itself or just using it:
+
+**Developing from source** (editing the code, regenerating demo data, etc.) — from
+the project root:
 
 ```bash
 python -m venv .venv
@@ -48,6 +52,9 @@ python scripts/generate_test_data.py   # writes data/mapmaker.xlsx + assets/logo
 (Already have a virtualenv, conda env, or other Python set up? Just `pip install
 -r requirements.txt` into it and skip the `venv` step.)
 
+**Installing it as a package** (to run it from anywhere, or on a machine that
+doesn't have this source checkout) — see Packaging below.
+
 ## Run
 
 ```bash
@@ -55,10 +62,63 @@ python main.py --file data/mapmaker.xlsx
 python main.py --file data/mapmaker.xlsx --map-type turbines   # just one map type
 ```
 
+Installed as a package instead (see Packaging)? The same thing is available
+anywhere as the `mapmaker` command, with identical arguments:
+`mapmaker --file data/mapmaker.xlsx`.
+
 Every data sheet present in the workbook (`wind_farms` / `turbines` / `grid_cells`)
 renders in one command, skipping any map type whose `enabled` setting is `false`
 (an explicit `--map-type` always renders regardless — it's a direct request); outputs
 land in `output/`.
+
+## Packaging
+
+mapmaker is a proper installable Python package (`pyproject.toml`, `mapmaker/cli.py`
+as the entry point) — the source layout under `## Setup`/`## Run` above still works
+unchanged for local development, this is for producing something installable
+elsewhere, or just having the `mapmaker` command available anywhere on your own
+machine instead of running `python main.py` from inside this checkout.
+
+- **pip**, from the project root:
+  ```bash
+  pip install .          # regular install
+  pip install -e .       # editable install -- code edits take effect without reinstalling
+  ```
+  Either way this registers the `mapmaker` console command and makes `import mapmaker`
+  work from any directory, not just this one. To build distributable files instead of
+  installing directly (a wheel + source distribution under `dist/`):
+  ```bash
+  pip install build
+  python -m build
+  ```
+  Dependencies come from `requirements.txt` (read at build time via
+  `[tool.setuptools.dynamic]` in `pyproject.toml`, so there's only one list to keep
+  in sync, not two) — exact-pinned rather than loose-ranged, since this is an
+  internal tool installed directly by its own users rather than a library other
+  packages depend on, so reproducibility matters more here than resolver flexibility.
+- **conda**, from the project root (needs the `conda-build` package:
+  `conda install conda-build`):
+  ```bash
+  conda build conda-recipe/
+  conda install --use-local mapmaker
+  ```
+  `conda-recipe/meta.yaml` builds from this local checkout and installs via pip
+  under the hood (`pip install . --no-deps`), pulling its run dependencies from
+  conda-forge equivalents of `requirements.txt` (`matplotlib-base` instead of
+  `matplotlib`, since this tool only ever saves PNGs and never opens an interactive
+  window, so it doesn't need matplotlib's GUI-backend packages). It wasn't
+  build-tested against a live conda-forge channel while writing this (no conda
+  installed in that environment) — if a pinned version isn't available on the
+  channel you build against, relax that one line to `>=` or drop the pin.
+
+Both paths bundle `mapmaker/assets/logo.png` (the default footer logo — see
+`company.logo_path` above) inside the installed package itself, so it's available
+regardless of where or how mapmaker ends up installed.
+
+This is set up for **building and installing locally/internally** — no PyPI or
+conda-forge account, license file, or public-channel submission is included, since
+none of that is needed unless you later decide to publish this beyond your own
+machine/organization.
 
 ## The workbook (one Excel file for everything)
 
@@ -108,7 +168,11 @@ holds every sheet mapmaker needs:
   - `value` — parsed automatically: `true`/`false` → boolean, a number → int/float,
     a comma-separated cell (e.g. `1.0, 1.3, 1.4, 2.1`) → a list, anything else →
     string. Leave a row out entirely (or leave `value` blank) to use the built-in
-    default for that setting.
+    default for that setting. **Every color/marker row has an in-cell dropdown** —
+    click the cell and use the arrow to pick a value instead of typing one; see
+    `style_reference` below. You're never limited to what's in the dropdown, though
+    — typing anything else (a precise hex code, an uncommon matplotlib marker) works
+    exactly as before and isn't blocked.
   - `description` — free text for a human reading the workbook; mapmaker's parser
     ignores this column entirely, so put whatever's useful there.
 
@@ -117,9 +181,27 @@ holds every sheet mapmaker needs:
   Config option reference below. `scripts/generate_test_data.py`'s `BASIC_ROWS` /
   `ADVANCED_ROWS` are a complete worked example of literally every option, each with
   its own description.
+- **`style_reference`** — a visible lookup sheet, purely for humans (and the
+  dropdowns above, which pull their list from it): a curated set of named
+  matplotlib colors, each with an actual color swatch next to it, and a table of
+  common matplotlib marker codes with what each one looks like (`o` circle, `D`
+  diamond, `^` triangle, ...) plus a link to matplotlib's full marker reference for
+  anything not listed. Named colors are used instead of hex throughout — a color
+  name means something at a glance, a hex code doesn't. The two exceptions are
+  `style.farm_colors.*`/`style.category_colors.*`, which keep their exact
+  Okabe-Ito colorblind-safe hex values on purpose (see Map types above) rather
+  than an approximate named color.
 
 Paths inside the workbook (`company.logo_path`, `export.output_dir`) are resolved
 relative to the workbook's own directory unless given as absolute paths.
+`company.logo_path` is the one exception with its own built-in default: leave it
+unset and mapmaker falls back to its own logo bundled inside the `mapmaker` package
+itself (`mapmaker/assets/logo.png`, a neutral "YOUR LOGO" placeholder) rather than
+looking for anything next to the workbook — this is what makes the footer logo work
+out of the box for a pip/conda install, where nothing is guaranteed to sit alongside
+a given workbook the way `mapmaker/`'s own files always sit alongside each other.
+Set `company.logo_path` to your own logo's path to override it, or to an explicitly
+blank value to turn the footer logo off entirely instead of falling back.
 
 See `mapmaker/data_io.py` for the exact column contract each `read_*` function enforces,
 and `mapmaker/config.py::load_workbook_configs` for exactly how the settings sheets are parsed.
@@ -153,7 +235,7 @@ by every map type, but a setting a given map type doesn't use is simply ignored)
 | Key | Sheet | Default | Applies to | What it does |
 |---|---|---|---|---|
 | `company.name` | basic | *(empty)* | all | Stored but not currently drawn as text (only the logo image shows) — see Footer metadata. |
-| `company.logo_path` | basic | *(empty)* | all | Path to a logo image, resolved relative to the workbook's own directory. |
+| `company.logo_path` | basic | *(mapmaker's own bundled logo)* | all | Path to a logo image, resolved relative to the workbook's own directory (or absolute). Unset falls back to a placeholder logo bundled inside the `mapmaker` package itself, not to nothing — see "The workbook" above. Set explicitly blank to turn the footer logo off. |
 | `company.logo_scale` | basic | `1.0` | all | Multiplier on the logo's footer size, anchored to the bottom-right corner (e.g. `1.5` = 50% bigger). |
 
 ### `map.*` — page/canvas and data extent
@@ -266,7 +348,7 @@ by every map type, but a setting a given map type doesn't use is simply ignored)
 | `style.marker` | `o` | Marker shape, any matplotlib marker code (`o` circle, `D` diamond, `^` triangle, ...). |
 | `style.color` | `#2166ac` | Marker color used when there's no `status` column (or for statuses/farms missing from `status_colors`/`farm_colors`). |
 | `style.status_colors.<status>` | *(none)* | Per-status color, only used if the `wind_farms` sheet has a `status` column, e.g. `style.status_colors.Operational = #2ca25f`. Ignored if `farm_colors` is set (see below). |
-| `style.farm_colors.<name>` | *(none)* | Per-farm color, keyed by the farm's own `name` — gives each wind farm its own distinct color and its own legend entry, overriding `status`-based grouping entirely once any row is set. E.g. `style.farm_colors.Nordsee Alpha = #e6194B`. With many farms this needs a taller `footer.height_fraction` to fit every legend entry (see Layout notes) — the demo enables this for all 10 farms. |
+| `style.farm_colors.<name>` | *(none)* | Per-farm color, keyed by the farm's own `name` — gives each wind farm its own distinct color and its own legend entry, overriding `status`-based grouping entirely once any row is set. E.g. `style.farm_colors.Nordsee Alpha = darkorange` (pick from the `style_reference` dropdown, or a precise hex code). With many farms this needs a taller `footer.height_fraction` to fit every legend entry (see Layout notes) — the demo enables this for all 10 farms, using exact colorblind-safe hex values rather than named colors (see `style_reference` in "The workbook" above). |
 | `style.legend_labels.<status-or-name>` | *(none)* | Overrides one legend entry's displayed text — keyed by `status` value normally, or by farm `name` when `farm_colors` is in use — without changing its color/grouping. E.g. `style.legend_labels.Nordsee Alpha = Nordsee Alpha (flagship)`. |
 | `style.size_field` | `capacity_mw` | Optional numeric column that scales marker size; omit the column to fall back to a fixed size. |
 | `style.base_marker_size` | `45` | Base marker size before size-field scaling. |
@@ -297,7 +379,7 @@ by every map type, but a setting a given map type doesn't use is simply ignored)
 |---|---|---|
 | `style.marker` | `D` | Fallback marker shape for any dataset not listed in `dataset_markers`. |
 | `style.dataset_markers.<dataset>` | *(none)* | Per-dataset marker shape override, e.g. `style.dataset_markers.ERA5 = D`, `style.dataset_markers.MERRA2 = o` — lets each reanalysis dataset use its own icon. |
-| `style.dataset_colors.<dataset>` | `ERA5=#3182bd, MERRA2=#e6550d` | Per-dataset color. |
+| `style.dataset_colors.<dataset>` | `ERA5=steelblue, MERRA2=chocolate` | Per-dataset color. |
 | `style.legend_labels.<dataset>` | *(none)* | Overrides one dataset's legend text (default `"<dataset> grid"`, e.g. `"ERA5 grid"`) without changing its color/marker, e.g. `style.legend_labels.ERA5 = ERA5 (0.25°)`. |
 | `style.marker_size` | `14` | Marker size (shared across datasets). |
 | `style.label_points` | `true` | Draw a label next to any row whose `label` column is non-blank (see the `grid_cells` sheet); rows with a blank `label` show only their point, unlabeled. Has no effect if the sheet has no `label` column at all. |
@@ -522,4 +604,6 @@ merged over the built-in `DEFAULTS`. `mapmaker/data_io.py` reads the
 builds each figure as a 2-row GridSpec (map row, footer row) inside an outer bordered
 page. The footer splits into legend / scale bar / CRS / date-author-copyright+logo
 panels. `mapmaker/elements.py` holds the reusable chrome: graticule/ticks, north
-arrow, scale bar, inset map, footer panels.
+arrow, scale bar, inset map, footer panels. `mapmaker/cli.py` is the installed
+`mapmaker` console command (see Packaging above); the repo-root `main.py` is a thin
+wrapper around it for running from a source checkout without installing.

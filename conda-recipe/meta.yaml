@@ -1,0 +1,47 @@
+{% set version = "0.1.0" %}  {# keep in sync with mapmaker/__init__.py's __version__ #}
+
+package:
+  name: mapmaker
+  version: {{ version }}
+
+source:
+  # Builds from this local checkout (`conda build conda-recipe/` from the repo
+  # root) rather than a git URL/tarball -- appropriate for an internal/private
+  # package built and installed locally, not published to a public channel.
+  path: ..
+
+build:
+  noarch: python
+  number: 0
+  script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv"
+  entry_points:
+    - mapmaker = mapmaker.cli:main
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=68
+  run:
+    - python >=3.10
+    - contextily 1.7.1
+    - geopandas 1.1.4
+    # matplotlib-base (not matplotlib) -- this tool only ever saves PNGs, never
+    # opens an interactive window, so it doesn't need the GUI-backend packages
+    # (Qt/tk bindings) that the full `matplotlib` metapackage pulls in on conda.
+    - matplotlib-base 3.11.1
+    - numpy 2.5.2
+    - pandas 3.0.5
+    - pillow 12.3.0
+    - pyproj 3.7.2
+    - openpyxl 3.1.5
+    - shapely 2.1.2
+
+test:
+  imports:
+    - mapmaker
+  commands:
+    - mapmaker --help
+
+about:
+  summary: QGIS print-layout-style map generator for wind energy datasets, driven by a single Excel workbook.

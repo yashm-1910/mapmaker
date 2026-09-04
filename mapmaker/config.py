@@ -13,6 +13,16 @@ import pandas as pd
 
 MAP_TYPES = ["wind_farms", "turbines", "grid_cells"]
 
+# Bundled inside the package itself (mapmaker/assets/logo.png) rather than resolved
+# relative to a workbook's own directory -- this is what makes `company.logo_path`
+# work out of the box for a pip/conda install, where the only thing guaranteed to
+# exist next to mapmaker's own code is mapmaker's own package directory, not
+# whatever folder a user's workbook happens to live in. Computed from __file__
+# (not importlib.resources) since a plain on-disk PNG next to the package's Python
+# files works identically whether run from source or from an installed (unzipped)
+# wheel -- no need for the more involved resource-loading API this doesn't require.
+DEFAULT_LOGO_PATH = str(Path(__file__).resolve().parent / "assets" / "logo.png")
+
 # Friendly display names for the settings sheets' scope column -- purely cosmetic;
 # `MAP_TYPES` above (and data-sheet tab names, --map-type, output filenames) stay the
 # internal wind_farms/turbines/grid_cells identifiers everywhere else in the code.
@@ -40,7 +50,13 @@ DEFAULTS: dict[str, Any] = {
     },
     "company": {
         "name": "",
-        "logo_path": "",
+        # Defaults to mapmaker's own bundled placeholder logo (see DEFAULT_LOGO_PATH
+        # above) so the footer always has something sensible to show out of the box.
+        # Set a `company.logo_path` row to point at your own logo instead -- relative
+        # paths resolve against the workbook's own directory (see resolve_path
+        # below), or use an absolute path. Set it to an explicitly blank value to
+        # turn the logo off entirely rather than falling back to the bundled one.
+        "logo_path": DEFAULT_LOGO_PATH,
         "logo_scale": 1.0,  # multiplier on the logo's base footer size, anchored bottom-right
     },
     "map": {

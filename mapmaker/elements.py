@@ -482,7 +482,10 @@ def add_footer(
 
     company_cfg = cfg.get("company", {})
     logo_path = config_mod.resolve_path(cfg, company_cfg.get("logo_path"))
-    if logo_path and Path(logo_path).exists():
+    if logo_path and not Path(logo_path).exists():
+        warnings.warn(f"company.logo_path {logo_path!r} does not exist; skipping the footer logo.")
+        logo_path = None
+    if logo_path:
         img = plt.imread(str(logo_path))
         # Logo anchors to the bottom-right corner rather than spanning/centering
         # the full column height, so it doesn't compete with the top-aligned text.

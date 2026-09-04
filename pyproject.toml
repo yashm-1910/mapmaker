@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mapmaker"
+dynamic = ["version", "dependencies"]
+description = "QGIS print-layout-style map generator for wind energy datasets, driven by a single Excel workbook."
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.scripts]
+mapmaker = "mapmaker.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "mapmaker.__version__" }
+# Reuses requirements.txt as-is (exact pins) rather than maintaining a second,
+# looser dependency list -- this is an internal tool installed directly by its
+# own users, not a library other packages depend on, so pinned reproducibility
+# matters more here than flexibility for downstream resolvers.
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["mapmaker*"]
+
+[tool.setuptools.package-data]
+mapmaker = ["assets/*.png"]
