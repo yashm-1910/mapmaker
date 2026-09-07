@@ -629,20 +629,29 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
 
     # Optional single reference point (e.g. the wind farm this grid comparison is
     # centered on), folded into the extent so the map frame accounts for it even if it
-    # sits near a grid edge. Its position/label come from a `dataset: reference` row in
-    # the `grid_cells` sheet if one matches this farm (see data_io.read_grid_reference_point)
-    # -- naturally one reference point per farm, matched by farm_name, no extra config
-    # needed. Falls back to `cfg["reference_point"]`'s own name/lon/lat (e.g. for a
-    # workbook with no farm_name column at all); `show`/`marker`/`color`/`size`/
-    # `label_fontsize` always come from config either way.
+    # sits near a grid edge. Its position/label are resolved by farm_name, in priority
+    # order:
+    #   1. a `dataset: reference` row in the `grid_cells` sheet matching this farm
+    #      (see data_io.read_grid_reference_point) -- an explicit override, for when the
+    #      reference sits somewhere other than the farm's portfolio coordinate;
+    #   2. otherwise the farm's own row in the `wind_farms` (Portfolio) sheet
+    #      (see data_io.read_wind_farm_point) -- the farm's coordinates already live
+    #      there, so the common case needs no reference row and no config at all;
+    #   3. otherwise `cfg["reference_point"]`'s own name/lon/lat, e.g. for a reference
+    #      that isn't a portfolio farm, or a workbook with no farm_name column at all.
+    # `show`/`marker`/`color`/`size`/`label_fontsize` always come from config regardless
+    # of which source supplied the coordinates -- including `show`, so the reference point
+    # stays opt-in even once it can be found automatically.
     ref = dict(cfg.get("reference_point", {}))
-    data_ref = data_io.read_grid_reference_point(path, farm_name)
-    if data_ref:
-        ref["lon"], ref["lat"] = data_ref["lon"], data_ref["lat"]
-        ref["name"] = data_ref["name"] or ref.get("name")
+    matched_ref = data_io.read_grid_reference_point(path, farm_name) or data_io.read_wind_farm_point(path, farm_name)
+    if matched_ref:
+        ref["lon"], ref["lat"] = matched_ref["lon"], matched_ref["lat"]
+        ref["name"] = matched_ref["name"] or ref.get("name")
 
     show_ref = ref.get("show", False) and ref.get("lon") is not None and ref.get("lat") is not None
-    if show_ref and not data_ref and farm_name and ref.get("name") and str(ref["name"]).strip().lower() != str(farm_name).strip().lower():
+    # A config-supplied reference (no farm match) naming a *different* farm than the one
+    # being rendered would otherwise be drawn on every per-farm map; drop it there.
+    if show_ref and not matched_ref and farm_name and ref.get("name") and str(ref["name"]).strip().lower() != str(farm_name).strip().lower():
         show_ref = False
     extent_gdf = gdf
     if show_ref:

@@ -12,6 +12,11 @@ requires-python = ">=3.10"
 [project.scripts]
 mapmaker = "mapmaker.cli:main"
 
+# gui-scripts (not scripts) so Windows wraps this one with pythonw.exe -- the window
+# opens on its own, with no console box sitting behind it.
+[project.gui-scripts]
+mapmaker-gui = "mapmaker.gui:main"
+
 [tool.setuptools.dynamic]
 version = { attr = "mapmaker.__version__" }
 # Reuses requirements.txt as-is (exact pins) rather than maintaining a second,

@@ -16,6 +16,7 @@ build:
   script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv"
   entry_points:
     - mapmaker = mapmaker.cli:main
+    - mapmaker-gui = mapmaker.gui:main
 
 requirements:
   host:

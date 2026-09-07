@@ -50,7 +50,8 @@ python scripts/generate_test_data.py   # writes data/mapmaker.xlsx + assets/logo
 ```
 
 (Already have a virtualenv, conda env, or other Python set up? Just `pip install
--r requirements.txt` into it and skip the `venv` step.)
+-r requirements.txt` into it and skip the environment-creation step entirely — the
+environment's name and location don't matter to mapmaker.)
 
 **Installing it as a package** (to run it from anywhere, or on a machine that
 doesn't have this source checkout) — see Packaging below.
@@ -71,20 +72,102 @@ renders in one command, skipping any map type whose `enabled` setting is `false`
 (an explicit `--map-type` always renders regardless — it's a direct request); outputs
 land in `output/`.
 
+## No-code: the Mapmaker window
+
+For anyone who'd rather not touch a terminal, mapmaker ships a small desktop window
+that does the same job: pick the workbook, pick which map(s) to draw, press **Generate
+maps**. Progress, any warnings, and the saved file paths appear in the panel below, and
+**Open output folder** opens the results in Explorer/Finder. It remembers the last
+workbook you used, so the everyday loop is open it, click, done.
+
+- **A standalone executable** — the option to hand to someone else. No Python, no
+  environment, no setup: unzip the folder, double-click `Mapmaker.exe`. See
+  "Standalone executable" below.
+- **Installed as a package** (see Packaging below): run the `mapmaker-gui` command, or
+  make a desktop shortcut to it. On Windows it's a GUI entry point, so the window opens
+  with no console box behind it.
+- **From this source checkout**: double-click **`Mapmaker.bat`** in the repo root. This
+  is the convenience launcher for a machine that already has the code — the executable
+  above is the one to distribute.
+
+`Mapmaker.bat` doesn't assume any particular Python setup — it goes looking for an
+interpreter that can actually run mapmaker, so the same file works on a machine with a
+`.venv`, one with Anaconda, or one with a plain system Python, with nothing to activate
+first. It tries, in order:
+
+1. `%MAPMAKER_PYTHON%`, if you want to pin one specific interpreter;
+2. whichever interpreter worked last time (remembered in
+   `%LOCALAPPDATA%\mapmaker\python_path.txt`, so repeat launches skip the search);
+3. this project's own `.venv`;
+4. the conda env or virtualenv currently activated in that shell (`%CONDA_PREFIX%` /
+   `%VIRTUAL_ENV%`);
+5. whatever `python` is on `PATH`;
+6. **every conda environment it can find** under the usual Anaconda / Miniconda /
+   Miniforge install locations, including named envs under `<root>\envs\` — so an
+   Anaconda user's environment is found without anyone needing to know its name.
+
+Each candidate is checked by actually asking it to import mapmaker and its
+dependencies, not by trusting the path, so a half-installed environment is skipped
+rather than producing a window that never appears. If nothing on the machine qualifies,
+it prints what it searched and how to fix it (`conda env create -f environment.yml`,
+`pip install -r requirements.txt`, or setting `MAPMAKER_PYTHON`) instead of failing
+silently.
+
+On macOS/Linux there's no equivalent double-click launcher — install the package and
+use the `mapmaker-gui` command, or run `python -m mapmaker.gui` from the checkout.
+
+### Standalone executable
+
+The version to give to someone who doesn't have Python and shouldn't have to get it:
+
+```bash
+pip install -e ".[build]"        # or just: pip install pyinstaller
+python packaging/build_exe.py
+```
+
+That produces `dist/Mapmaker/` (~300 MB — it carries its own Python, GDAL, PROJ and
+matplotlib). Zip the **whole folder**; `Mapmaker.exe` on its own won't run. The
+recipient unzips it, double-clicks the `.exe`, and gets the same window with nothing
+installed.
+
+The same executable also runs the command line when given arguments
+(`Mapmaker.exe --file book.xlsx --map-type turbines`), so one binary covers both the
+click-it-and-go user and anyone wanting to script or schedule a render.
+
+**Read [`packaging/DISTRIBUTION.md`](packaging/DISTRIBUTION.md) before sending it to
+anyone.** Frozen Python apps trip antivirus heuristics and SmartScreen warnings by
+their shape rather than their content, and code signing — not build tweaks — is what
+actually fixes that. The build already avoids the two worst offenders (it's a onedir
+build, not onefile, and UPX compression is off); that document covers the rest: what to
+check before handing it over, how to sign it, what to do about a false positive, and
+the license-notice obligation that redistribution triggers but local use doesn't.
+
+The typical workflow for a non-technical user is: **Edit workbook in Excel** → change
+numbers/settings → save → **Generate maps**. Nothing in the workbook, the settings
+sheets, or the outputs differs from the command-line route — the window is only a
+front-end onto the same `mapmaker --file ...` run.
+
+The window is built on tkinter, which comes with Python itself, so it adds no
+dependency beyond what's already in `requirements.txt`.
+
 ## Packaging
 
-mapmaker is a proper installable Python package (`pyproject.toml`, `mapmaker/cli.py`
-as the entry point) — the source layout under `## Setup`/`## Run` above still works
-unchanged for local development, this is for producing something installable
-elsewhere, or just having the `mapmaker` command available anywhere on your own
-machine instead of running `python main.py` from inside this checkout.
+mapmaker is a proper installable Python package (`pyproject.toml`, with
+`mapmaker/cli.py` and `mapmaker/gui.py` as its two entry points) — the source layout
+under `## Setup`/`## Run` above still works unchanged for local development, this is for
+producing something installable elsewhere, or just having the `mapmaker` command
+available anywhere on your own machine instead of running `python main.py` from inside
+this checkout. Installing is also what gives a non-technical user the `mapmaker-gui`
+window without a checkout to launch it from.
 
 - **pip**, from the project root:
   ```bash
   pip install .          # regular install
   pip install -e .       # editable install -- code edits take effect without reinstalling
   ```
-  Either way this registers the `mapmaker` console command and makes `import mapmaker`
+  Either way this registers both commands — `mapmaker` (console) and `mapmaker-gui`
+  (the desktop window, declared under `[project.gui-scripts]` so Windows launches it
+  through `pythonw.exe` with no console box behind it) — and makes `import mapmaker`
   work from any directory, not just this one. To build distributable files instead of
   installing directly (a wheel + source distribution under `dist/`):
   ```bash
@@ -97,7 +180,10 @@ machine instead of running `python main.py` from inside this checkout.
   internal tool installed directly by its own users rather than a library other
   packages depend on, so reproducibility matters more here than resolver flexibility.
 - **conda**, from the project root (needs the `conda-build` package:
-  `conda install conda-build`):
+  `conda install conda-build`). Note this is different from `environment.yml` under
+  Setup above: that one creates an environment holding mapmaker's *dependencies*, to
+  run it from a checkout; this one builds mapmaker *itself* into an installable conda
+  package:
   ```bash
   conda build conda-recipe/
   conda install --use-local mapmaker
@@ -106,7 +192,8 @@ machine instead of running `python main.py` from inside this checkout.
   under the hood (`pip install . --no-deps`), pulling its run dependencies from
   conda-forge equivalents of `requirements.txt` (`matplotlib-base` instead of
   `matplotlib`, since this tool only ever saves PNGs and never opens an interactive
-  window, so it doesn't need matplotlib's GUI-backend packages). It wasn't
+  window — `mapmaker-gui`'s own window is tkinter, which comes with conda's `python`
+  package rather than with matplotlib). It wasn't
   build-tested against a live conda-forge channel while writing this (no conda
   installed in that environment) — if a pinned version isn't available on the
   channel you build against, relax that one line to `>=` or drop the pin.
@@ -307,8 +394,8 @@ by every map type, but a setting a given map type doesn't use is simply ignored)
 | Key | Sheet | Default | Applies to | What it does |
 |---|---|---|---|---|
 | `reference_point.show` | basic | `false` | grid_cells | Toggle the reference point on/off. |
-| `reference_point.name` | advanced | *(empty)* | grid_cells | Fallback label, only used if the sheet has no matching `dataset = reference` row — normally the point's own `farm_name` row in `grid_cells` supplies the label instead (see Layout notes). |
-| `reference_point.lon` / `.lat` | advanced | *(none)* | grid_cells | Fallback coordinates, same rule — normally sourced from the sheet's `dataset = reference` row for the current farm. |
+| `reference_point.name` | advanced | *(empty)* | grid_cells | Last-resort label. Normally the name comes from the farm itself — either its `dataset = reference` row in `grid_cells`, or its row in the `wind_farms` (Portfolio) sheet (see Layout notes). |
+| `reference_point.lon` / `.lat` | advanced | *(none)* | grid_cells | Last-resort coordinates, same rule — normally taken from the farm's `dataset = reference` row, else looked up in the `wind_farms` sheet by matching farm name. |
 | `reference_point.marker` | advanced | `o` | grid_cells | Marker shape, any matplotlib marker code. |
 | `reference_point.color` | advanced | `#d62728` | grid_cells | Marker color. |
 | `reference_point.size` | advanced | `70` | grid_cells | Marker size. |
@@ -508,9 +595,25 @@ example of every key above, each with its own description, and `mapmaker/config.
   own* farm's reference row — no per-farm config needed, and a distant farm's point
   never leaks into another farm's extent. It's included in the map's extent calculation,
   so the frame adjusts to keep it visible even if it sits near the edge of the grid.
-  For a workbook with no `farm_name` column at all (a single combined grid map), you can
-  instead set `reference_point.name`/`.lon`/`.lat` directly in settings as a fallback —
-  used only when the sheet has no matching `reference` row.
+
+  **You usually don't need that `reference` row at all.** If the farm named in
+  `grid_cells` also appears in the `wind_farms` (Portfolio) sheet, its coordinates are
+  picked up from there automatically, matched on the farm name (case- and
+  whitespace-insensitive) — the farm is already in the portfolio with a lon/lat, so
+  repeating it would just be a second copy to keep in sync. Turning
+  `reference_point.show` on is then the only thing needed. Resolution order, highest
+  first:
+
+  1. a `dataset = reference` row in `grid_cells` matching this farm — an explicit
+     override, for when the reference sits somewhere other than the portfolio coordinate;
+  2. the farm's own row in the `wind_farms` sheet, matched by name;
+  3. `reference_point.name`/`.lon`/`.lat` in settings — for a reference that isn't a
+     portfolio farm at all, or a workbook with no `farm_name` column (a single combined
+     grid map).
+
+  `show`/`marker`/`color`/`size`/`label_fontsize` always come from settings regardless of
+  which of the three supplied the coordinates — `show` included, so the point stays
+  opt-in even now that it can be found on its own.
 
 ## Footer metadata
 
@@ -607,3 +710,9 @@ panels. `mapmaker/elements.py` holds the reusable chrome: graticule/ticks, north
 arrow, scale bar, inset map, footer panels. `mapmaker/cli.py` is the installed
 `mapmaker` console command (see Packaging above); the repo-root `main.py` is a thin
 wrapper around it for running from a source checkout without installing.
+`mapmaker/gui.py` is the `mapmaker-gui` desktop window (see "No-code" above) — it drives
+the same `cli.BUILDERS` on a worker thread so the window stays responsive, and the
+repo-root `Mapmaker.bat` is its double-click launcher for a source checkout.
+`packaging/` holds the frozen-executable build: `build_exe.py` (run this),
+`mapmaker-gui.spec` (what gets bundled and why), `entry_gui.py` (the frozen app's
+entry point, dispatching to the window or the CLI), and `DISTRIBUTION.md`.

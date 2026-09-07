@@ -22,6 +22,39 @@ def read_wind_farms(path: str | Path) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
 
+def read_wind_farm_point(path: str | Path, farm_name: str | None = None) -> dict | None:
+    """Look up one wind farm's own coordinates from the workbook's `wind_farms` (Portfolio)
+    sheet, matched by name.
+
+    Used as the automatic fallback source for a grid_cells map's reference point: the farm
+    a reanalysis comparison is centered on is almost always already in the portfolio with
+    its lon/lat, so there's normally no need to repeat those coordinates as a
+    `dataset: reference` row or as `reference_point.lon`/`.lat` config
+    (see render.py::build_grid_map for the full priority order).
+
+    Matching is case-insensitive and ignores surrounding whitespace, so "Nordsee Alpha"
+    in the grid_cells sheet finds "nordsee alpha " in the portfolio. Returns
+    `{"name": ..., "lon": ..., "lat": ...}` using the portfolio's own spelling of the
+    name, or `None` if `farm_name` is None (a combined map covering every farm implies no
+    single reference), the sheet is missing/malformed, or no row matches.
+    """
+    if not farm_name:
+        return None
+    try:
+        df = pd.read_excel(path, sheet_name="wind_farms")
+    except ValueError:  # no `wind_farms` sheet in this workbook
+        return None
+    if not {"name", "lon", "lat"}.issubset(df.columns):
+        return None
+    match = df[df["name"].astype(str).str.strip().str.lower() == str(farm_name).strip().lower()]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    if pd.isna(row["lon"]) or pd.isna(row["lat"]):
+        return None
+    return {"name": str(row["name"]).strip(), "lon": float(row["lon"]), "lat": float(row["lat"])}
+
+
 def read_turbines(path: str | Path, farm_name: str | None = None) -> gpd.GeoDataFrame:
     """Load turbine point locations from the workbook's `turbines` sheet, optionally
     filtered to one farm.
