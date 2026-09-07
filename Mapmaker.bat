@@ -7,9 +7,17 @@ REM available anywhere as the `mapmaker-gui` command and this file isn't needed.
 setlocal
 cd /d "%~dp0"
 
-REM Prefer the project's own virtual environment if there is one, so the launcher
-REM works whether or not the user has activated it first.
-if exist ".venv\Scripts\pythonw.exe" (
+REM To use a specific Python (e.g. an Anaconda/conda environment) instead of the
+REM automatic search below, set its python.exe path here:
+REM   set "MAPMAKER_PYTHON=C:\Users\you\anaconda3\envs\mapmaker\python.exe"
+set "MAPMAKER_PYTHON="
+
+if not "%MAPMAKER_PYTHON%"=="" (
+    set "PY=%MAPMAKER_PYTHON%"
+    set "PYW=%MAPMAKER_PYTHON:python.exe=pythonw.exe%"
+) else if exist ".venv\Scripts\pythonw.exe" (
+    REM Prefer the project's own virtual environment if there is one, so the launcher
+    REM works whether or not the user has activated it first.
     set "PY=.venv\Scripts\python.exe"
     set "PYW=.venv\Scripts\pythonw.exe"
 ) else (

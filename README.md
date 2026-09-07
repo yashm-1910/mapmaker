@@ -80,75 +80,27 @@ maps**. Progress, any warnings, and the saved file paths appear in the panel bel
 **Open output folder** opens the results in Explorer/Finder. It remembers the last
 workbook you used, so the everyday loop is open it, click, done.
 
-- **A standalone executable** — the option to hand to someone else. No Python, no
-  environment, no setup: unzip the folder, double-click `Mapmaker.exe`. See
-  "Standalone executable" below.
 - **Installed as a package** (see Packaging below): run the `mapmaker-gui` command, or
   make a desktop shortcut to it. On Windows it's a GUI entry point, so the window opens
   with no console box behind it.
-- **From this source checkout**: double-click **`Mapmaker.bat`** in the repo root. This
-  is the convenience launcher for a machine that already has the code — the executable
-  above is the one to distribute.
+- **From this source checkout**: double-click **`Mapmaker.bat`** in the repo root.
 
-`Mapmaker.bat` doesn't assume any particular Python setup — it goes looking for an
-interpreter that can actually run mapmaker, so the same file works on a machine with a
-`.venv`, one with Anaconda, or one with a plain system Python, with nothing to activate
-first. It tries, in order:
+`Mapmaker.bat` uses this project's own `.venv` if there is one (so it works whether or
+not you've activated it first), otherwise falls back to whatever `python`/`pythonw` is
+on `PATH`. To use a different environment instead — an Anaconda env, say — open
+`Mapmaker.bat` in a text editor and set the `MAPMAKER_PYTHON` line near the top to that
+environment's `python.exe` path:
 
-1. `%MAPMAKER_PYTHON%`, if you want to pin one specific interpreter;
-2. whichever interpreter worked last time (remembered in
-   `%LOCALAPPDATA%\mapmaker\python_path.txt`, so repeat launches skip the search);
-3. this project's own `.venv`;
-4. the conda env or virtualenv currently activated in that shell (`%CONDA_PREFIX%` /
-   `%VIRTUAL_ENV%`);
-5. whatever `python` is on `PATH`;
-6. **every conda environment it can find** under the usual Anaconda / Miniconda /
-   Miniforge install locations, including named envs under `<root>\envs\` — so an
-   Anaconda user's environment is found without anyone needing to know its name.
+```bat
+set "MAPMAKER_PYTHON=C:\Users\you\anaconda3\envs\mapmaker\python.exe"
+```
 
-Each candidate is checked by actually asking it to import mapmaker and its
-dependencies, not by trusting the path, so a half-installed environment is skipped
-rather than producing a window that never appears. If nothing on the machine qualifies,
-it prints what it searched and how to fix it (`conda env create -f environment.yml`,
-`pip install -r requirements.txt`, or setting `MAPMAKER_PYTHON`) instead of failing
-silently.
+Leave it blank (the default) to use the automatic `.venv`/`PATH` search instead. Either
+way, it checks the dependencies are actually importable before opening the window, so a
+half-installed environment gets a clear message instead of a window that never appears.
 
 On macOS/Linux there's no equivalent double-click launcher — install the package and
 use the `mapmaker-gui` command, or run `python -m mapmaker.gui` from the checkout.
-
-### Standalone executable
-
-The version to give to someone who doesn't have Python and shouldn't have to get it:
-
-```bash
-pip install -e ".[build]"        # or just: pip install pyinstaller
-python packaging/build_exe.py
-```
-
-That produces `dist/Mapmaker/` (~300 MB — it carries its own Python, GDAL, PROJ and
-matplotlib). Zip the **whole folder**; `Mapmaker.exe` on its own won't run. The
-recipient unzips it, double-clicks the `.exe`, and gets the same window with nothing
-installed.
-
-The same executable also runs the command line when given arguments
-(`Mapmaker.exe --file book.xlsx --map-type turbines`), so one binary covers both the
-click-it-and-go user and anyone wanting to script or schedule a render.
-
-**Read [`packaging/DISTRIBUTION.md`](packaging/DISTRIBUTION.md) before sending it to
-anyone.** Frozen Python apps trip antivirus heuristics and SmartScreen warnings by
-their shape rather than their content, and code signing — not build tweaks — is what
-actually fixes that. The build already avoids the two worst offenders (it's a onedir
-build, not onefile, and UPX compression is off); that document covers the rest: what to
-check before handing it over, how to sign it, what to do about a false positive, and
-the license-notice obligation that redistribution triggers but local use doesn't.
-
-The typical workflow for a non-technical user is: **Edit workbook in Excel** → change
-numbers/settings → save → **Generate maps**. Nothing in the workbook, the settings
-sheets, or the outputs differs from the command-line route — the window is only a
-front-end onto the same `mapmaker --file ...` run.
-
-The window is built on tkinter, which comes with Python itself, so it adds no
-dependency beyond what's already in `requirements.txt`.
 
 ## Packaging
 
@@ -180,10 +132,9 @@ window without a checkout to launch it from.
   internal tool installed directly by its own users rather than a library other
   packages depend on, so reproducibility matters more here than resolver flexibility.
 - **conda**, from the project root (needs the `conda-build` package:
-  `conda install conda-build`). Note this is different from `environment.yml` under
-  Setup above: that one creates an environment holding mapmaker's *dependencies*, to
-  run it from a checkout; this one builds mapmaker *itself* into an installable conda
-  package:
+  `conda install conda-build`). This builds mapmaker *itself* into an installable conda
+  package, as opposed to just installing its dependencies into an environment you
+  already have:
   ```bash
   conda build conda-recipe/
   conda install --use-local mapmaker
@@ -713,6 +664,3 @@ wrapper around it for running from a source checkout without installing.
 `mapmaker/gui.py` is the `mapmaker-gui` desktop window (see "No-code" above) — it drives
 the same `cli.BUILDERS` on a worker thread so the window stays responsive, and the
 repo-root `Mapmaker.bat` is its double-click launcher for a source checkout.
-`packaging/` holds the frozen-executable build: `build_exe.py` (run this),
-`mapmaker-gui.spec` (what gets bundled and why), `entry_gui.py` (the frozen app's
-entry point, dispatching to the window or the CLI), and `DISTRIBUTION.md`.
