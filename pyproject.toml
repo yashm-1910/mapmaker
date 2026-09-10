@@ -7,7 +7,7 @@ name = "mapmaker"
 dynamic = ["version", "dependencies"]
 description = "QGIS print-layout-style map generator for wind energy datasets, driven by a single Excel workbook."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 [project.scripts]
 mapmaker = "mapmaker.cli:main"

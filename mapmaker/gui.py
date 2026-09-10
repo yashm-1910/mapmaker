@@ -18,17 +18,7 @@ import subprocess
 import sys
 import threading
 import traceback
-import warnings
 from pathlib import Path
-
-# Must be set before anything imports matplotlib.pyplot (mapmaker.render does).
-# Rendering runs on a worker thread so the window stays responsive, and only the
-# non-interactive Agg backend is safe to drive from a thread that isn't the GUI's
-# own -- an interactive backend would try to open its own event loop and can
-# deadlock or crash against tkinter's.
-import matplotlib
-
-matplotlib.use("Agg")
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -41,6 +31,19 @@ ALL_MAPS = "All maps in the workbook"
 # every time) is open-and-click. Kept in the user's home directory rather than next
 # to the package, which may sit in a read-only install location.
 _SETTINGS_FILE = Path.home() / ".mapmaker_gui.json"
+
+# Launched via pythonw.exe (no console window), so an exception that never reaches
+# our own try/except -- e.g. a tkinter callback error, or anything escaping
+# root.mainloop() -- would otherwise vanish with the window and leave no trace.
+_CRASH_LOG = Path.home() / ".mapmaker_gui_crash.log"
+
+
+def _log_crash(text: str) -> None:
+    try:
+        with _CRASH_LOG.open("a", encoding="utf-8") as f:
+            f.write(f"\n--- {__import__('datetime').datetime.now().isoformat()} ---\n{text}")
+    except OSError:
+        pass  # a non-writable home directory just means "don't record"; not worth surfacing
 
 
 def _load_last_workbook() -> str:
@@ -174,12 +177,14 @@ class MapmakerApp:
     # -- worker thread ------------------------------------------------------
 
     def _render(self, path: Path, map_type: str | None) -> None:
-        """Run the render off the GUI thread, reporting back only through `self.messages`."""
-        # Imported here rather than at module scope so the window appears immediately:
-        # pulling in geopandas/contextily/matplotlib takes a noticeable moment, and a
-        # blank frozen window during startup is exactly what this GUI exists to avoid.
-        from mapmaker.cli import BUILDERS
+        """Run the render off the GUI thread, reporting back only through `self.messages`.
 
+        Each map is drawn in its own `mapmaker` subprocess rather than in-process: a
+        native crash inside matplotlib/contextily/GEOS raises no Python exception, so
+        nothing in this process could ever catch it -- it would silently take the whole
+        window down with it. Isolated to a subprocess, the same crash only ends that
+        subprocess, which comes back as an ordinary (non-zero exit code) error instead.
+        """
         try:
             configs = config_mod.load_workbook_configs(path)
             if not configs:
@@ -201,20 +206,24 @@ class MapmakerApp:
                     self.messages.put(("log", f"Skipped {label} (turned off in the settings sheet)."))
                     continue
                 self.messages.put(("log", f"Drawing {label}…"))
+                proc = subprocess.run(
+                    [sys.executable, "-m", "mapmaker.cli", "--file", str(path), "--map-type", mt],
+                    capture_output=True, text=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                )
+                for line in proc.stdout.splitlines():
+                    if line.startswith("Saved: "):
+                        p = Path(line[len("Saved: "):])
+                        saved.append(p)
+                        self.messages.put(("log", f"  Saved: {p}"))
                 # Surface matplotlib/contextily warnings (a failed basemap, a UTM zone
                 # mismatch) in the log instead of a terminal the user never sees.
-                with warnings.catch_warnings(record=True) as caught:
-                    warnings.simplefilter("always")
-                    out = BUILDERS[mt](cfg)
-                for w in caught:
-                    # Only the warnings that mean something to the person running this --
-                    # ResourceWarning/DeprecationWarning noise from the libraries underneath
-                    # would just make the log look like an error report when nothing is wrong.
-                    if issubclass(w.category, (UserWarning, RuntimeWarning)):
-                        self.messages.put(("log", f"  Warning: {w.message}"))
-                for p in out if isinstance(out, list) else [out]:
-                    saved.append(Path(p))
-                    self.messages.put(("log", f"  Saved: {p}"))
+                for line in proc.stderr.splitlines():
+                    if "Warning:" in line:
+                        self.messages.put(("log", f"  {line.strip()}"))
+                if proc.returncode != 0:
+                    detail = proc.stderr.strip() or f"exit code {proc.returncode}"
+                    raise RuntimeError(f"Rendering {label} failed: {detail}")
             self.messages.put(("done", saved))
         except Exception as exc:
             self.messages.put(("log", traceback.format_exc()))
@@ -267,8 +276,19 @@ class MapmakerApp:
 def main() -> None:
     """Entry point for the `mapmaker-gui` command."""
     root = tk.Tk()
+    # tkinter's default handler only writes to sys.stderr, which is None under
+    # pythonw -- without this override, an exception raised inside a widget
+    # callback (as opposed to the render worker thread, which reports through
+    # self.messages) would be silently dropped and could take the window with it.
+    root.report_callback_exception = lambda exc, val, tb: _log_crash(
+        "".join(traceback.format_exception(exc, val, tb))
+    )
     MapmakerApp(root)
-    root.mainloop()
+    try:
+        root.mainloop()
+    except Exception:
+        _log_crash(traceback.format_exc())
+        raise
 
 
 if __name__ == "__main__":

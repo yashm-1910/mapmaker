@@ -1,13 +1,10 @@
-{% set version = "0.1.0" %}  {# keep in sync with mapmaker/__init__.py's __version__ #}
+{% set version = "0.1.0" %}
 
 package:
   name: mapmaker
   version: {{ version }}
 
 source:
-  # Builds from this local checkout (`conda build conda-recipe/` from the repo
-  # root) rather than a git URL/tarball -- appropriate for an internal/private
-  # package built and installed locally, not published to a public channel.
   path: ..
 
 build:
@@ -20,17 +17,14 @@ build:
 
 requirements:
   host:
-    - python >=3.10
+    - python >=3.13
     - pip
     - setuptools >=68
   run:
-    - python >=3.10
+    - python >=3.13
     - contextily 1.7.1
-    - geopandas 1.1.4
-    # matplotlib-base (not matplotlib) -- this tool only ever saves PNGs, never
-    # opens an interactive window, so it doesn't need the GUI-backend packages
-    # (Qt/tk bindings) that the full `matplotlib` metapackage pulls in on conda.
-    - matplotlib-base 3.11.1
+    - geopandas 1.1.3
+    - matplotlib-base 3.11.0
     - numpy 2.5.2
     - pandas 3.0.5
     - pillow 12.3.0

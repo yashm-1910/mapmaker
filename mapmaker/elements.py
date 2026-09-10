@@ -354,17 +354,33 @@ def add_inset_map(
     basemap_interpolation: str = "bilinear",
     basemap_timeout: float = 15,
     min_bbox_frac: float = 0.05,
+    fixed_span_km: float | None = None,
 ):
-    """Add a small overview-map inset to `ax`, zoomed out `zoom_out_factor` times around the
-    same center, with a bounding-box outline marking the main map's ROI (`extent`). The inset
-    sits flush in one corner (`location`) and is the only element that draws a bounding box.
-    Returns the inset Axes.
+    """Add a small overview-map inset to `ax`, with a bounding-box outline marking the main
+    map's ROI (`extent`). The inset sits flush in one corner (`location`) and is the only
+    element that draws a bounding box. Returns the inset Axes.
+
+    By default the inset is zoomed out `zoom_out_factor` times around the ROI's own center, so
+    its zoom level scales with the ROI's size. Set `fixed_span_km` to instead fix the inset's
+    real-world width/height (in km) irrespective of the ROI's size -- e.g. so it always shows
+    country-level context whether the ROI is one turbine or a nationwide portfolio.
     """
     xmin, xmax, ymin, ymax = extent
     w, h = xmax - xmin, ymax - ymin
     cx_, cy_ = (xmin + xmax) / 2, (ymin + ymax) / 2
-    zf = max(zoom_out_factor, 1.01)
-    inset_extent = (cx_ - w * zf / 2, cx_ + w * zf / 2, cy_ - h * zf / 2, cy_ + h * zf / 2)
+
+    if fixed_span_km:
+        km_per_deg_lat = 111.32
+        if "4326" in str(crs).upper() or hasattr(crs, "is_geographic") and crs.is_geographic:
+            km_per_deg_lon = km_per_deg_lat * max(math.cos(math.radians(cy_)), 1e-6)
+            half_lon = (fixed_span_km / 2) / km_per_deg_lon
+            half_lat = (fixed_span_km / 2) / km_per_deg_lat
+        else:
+            half_lon = half_lat = (fixed_span_km * 1000) / 2
+        inset_extent = (cx_ - half_lon, cx_ + half_lon, cy_ - half_lat, cy_ + half_lat)
+    else:
+        zf = max(zoom_out_factor, 1.01)
+        inset_extent = (cx_ - w * zf / 2, cx_ + w * zf / 2, cy_ - h * zf / 2, cy_ + h * zf / 2)
 
     # Flush against the frame edge (no gap) -- the inset should touch the map's
     # corner exactly, like a QGIS print-layout overview map.
@@ -414,6 +430,20 @@ def add_inset_map(
 # ---------------------------------------------------------------------------
 
 
+_LEGEND_HANDLELENGTH = 2.0  # in units of fontsize, matplotlib legend convention
+_LEGEND_HANDLETEXTPAD = 0.6
+_LEGEND_BORDERPAD = 0.15
+_FOOTER_GAP_IN = 0.35  # fixed reading-space gap between each pair of footer columns
+_LOGO_TEXT_GAP_IN = 0.06  # fixed gap between the meta column's text and its logo
+
+
+def _text_block_width_in(lines: list[str], char_w_in: float, pad_in: float = 0.06) -> float:
+    """Rough estimate (see `_place_labels`' own char-width heuristic) of how wide the
+    longest of `lines` renders at the fontsize `char_w_in` was computed from."""
+    longest = max((len(str(t)) for t in lines), default=0)
+    return longest * char_w_in + pad_in
+
+
 def add_footer(
     fig,
     gs_cell,
@@ -426,8 +456,17 @@ def add_footer(
     extra_lines: list[str] | None = None,
 ):
     """Build the footer strip below the map: legend / scale bar / CRS / date-author-copyright+logo,
-    laid out as four bottom-aligned columns (`cfg["footer"]["column_widths"]`) inside `gs_cell`.
-    Returns the underlying 1x4 SubgridSpec.
+    laid out as four bottom-aligned columns inside `gs_cell`. Returns the underlying 1x4
+    SubgridSpec.
+
+    Column widths: `cfg["footer"]["column_widths"]` is used as-is only if every column
+    already has enough room for its own content at the page's actual fontsize/logo size
+    (neither of which is ever shrunk to make things fit); otherwise the four columns are
+    instead sized from their own content (legend entries/title, CRS text, date/author/
+    attribution/notes text, logo) so nothing has to overlap a neighboring column to fit --
+    see the width estimates below. A fixed `_FOOTER_GAP_IN` reading-space gap always sits
+    between each pair of columns regardless, rather than relying on the width estimates
+    alone to leave enough of one.
     """
     footer_cfg = cfg.get("footer", {})
     fontsize = footer_cfg.get("fontsize", 8)
@@ -438,67 +477,12 @@ def add_footer(
     text_color = str(footer_cfg.get("text_color", "0.15"))
     column_widths = footer_cfg.get("column_widths", [1.0, 1.3, 1.4, 2.1])
 
-    sub = gs_cell.subgridspec(1, 4, width_ratios=column_widths, wspace=0.03)
-
-    # -- legend --------------------------------------------------------------
-    # All four footer columns bottom-align, sitting right on the page's bottom
-    # border with no empty strip beneath them; the map above absorbs whatever
-    # slack is left instead.
-    ax_legend = fig.add_subplot(sub[0])
-    ax_legend.axis("off")
-    if legend_handles and cfg.get("legend", {}).get("show", True):
-        leg = ax_legend.legend(
-            handles=legend_handles, loc="lower left", bbox_to_anchor=(0.0, 0.0), frameon=False,
-            fontsize=fontsize, title=legend_title, title_fontsize=fontsize + 1,
-            borderaxespad=0, borderpad=0.15, handletextpad=0.6, labelspacing=0.45,
-        )
-        leg.get_title().set_ha("left")
-
-    # -- scale bar -----------------------------------------------------------
-    ax_scale = fig.add_subplot(sub[1])
+    show_legend = bool(legend_handles) and cfg.get("legend", {}).get("show", True)
     sb_cfg = cfg.get("scalebar", {})
-    if sb_cfg.get("show", True):
-        draw_scalebar_panel(
-            fig, ax_scale, map_ax, crs, extent, length_fraction=sb_cfg.get("length_fraction", 0.7),
-            font_size=fontsize, units=sb_cfg.get("units", "auto"),
-        )
-    else:
-        ax_scale.axis("off")
+    show_scale = sb_cfg.get("show", True)
 
-    # -- CRS label -----------------------------------------------------------
-    ax_crs = fig.add_subplot(sub[2])
-    ax_crs.axis("off")
-    ax_crs.set_xlim(0, 1)
-    ax_crs.set_ylim(0, 1)
-    if crs:
-        ax_crs.text(0.0, 0.0, f"Coordinate Reference System\n{crs}", transform=ax_crs.transAxes,
-                    ha="left", va="bottom", fontsize=fontsize, color=text_color, linespacing=1.6)
-
-    # -- date / author / attribution + logo -----------------------------------
-    ax_meta = fig.add_subplot(sub[3])
-    ax_meta.axis("off")
-    ax_meta.set_xlim(0, 1)
-    ax_meta.set_ylim(0, 1)
-
-    company_cfg = cfg.get("company", {})
-    logo_path = config_mod.resolve_path(cfg, company_cfg.get("logo_path"))
-    if logo_path and not Path(logo_path).exists():
-        warnings.warn(f"company.logo_path {logo_path!r} does not exist; skipping the footer logo.")
-        logo_path = None
-    if logo_path:
-        img = plt.imread(str(logo_path))
-        # Logo anchors to the bottom-right corner rather than spanning/centering
-        # the full column height, so it doesn't compete with the top-aligned text.
-        # `company.logo_scale` grows/shrinks it from that corner (base size at 1.0),
-        # clamped so it can never exceed the meta column it lives in.
-        base_w, base_h = 0.26, 0.45
-        scale = company_cfg.get("logo_scale", 1.0)
-        logo_w = min(base_w * scale, 1.0)
-        logo_h = min(base_h * scale, 1.0)
-        logo_ax = ax_meta.inset_axes([1.0 - logo_w, 0.0, logo_w, logo_h])
-        logo_ax.imshow(img)
-        logo_ax.axis("off")
-
+    # Date/author/attribution/notes text and the logo path are needed up front (rather
+    # than where they're drawn below) to size the meta column before any axes exist.
     lines = []
     if cfg.get("date"):
         lines.append(f"Date: {cfg['date']}")
@@ -513,7 +497,133 @@ def add_footer(
     if cfg.get("notes"):
         lines.extend(str(x) for x in cfg["notes"])
 
-    ax_meta.text(0.02, 0.0, "\n".join(lines), transform=ax_meta.transAxes, ha="left", va="bottom",
+    company_cfg = cfg.get("company", {})
+    logo_path = config_mod.resolve_path(cfg, company_cfg.get("logo_path"))
+    if logo_path and not Path(logo_path).exists():
+        warnings.warn(f"company.logo_path {logo_path!r} does not exist; skipping the footer logo.")
+        logo_path = None
+
+    fig_w_in, fig_h_in = fig.get_size_inches()
+    footer_bbox = gs_cell.get_position(fig)
+    footer_w_in = footer_bbox.width * fig_w_in
+    footer_h_in = footer_bbox.height * fig_h_in
+    char_w_in = fontsize * 0.58 / 72.0  # average glyph width at this fontsize, see _place_labels
+
+    legend_w_in = 0.35
+    if show_legend:
+        handle_w_in = (_LEGEND_HANDLELENGTH + _LEGEND_HANDLETEXTPAD) * fontsize / 72.0
+        label_chars = max([len(str(h.get_label())) for h in legend_handles] + [len(legend_title or "")])
+        legend_w_in = handle_w_in + label_chars * char_w_in + 2 * _LEGEND_BORDERPAD * fontsize / 72.0 + 0.06
+
+    # The scale bar always sizes its own bar/labels to whatever width its column ends up
+    # with (see draw_scalebar_panel's length_fraction/bar_frac clamp) -- this floor keeps
+    # that column wide enough for its two segment labels to sit apart legibly instead of
+    # crowding/overlapping each other.
+    scale_w_in = 1.6
+
+    crs_w_in = 0.35
+    if crs:
+        crs_w_in = _text_block_width_in(["Coordinate Reference System", str(crs)], char_w_in)
+
+    # The logo is sized against the *configured* column_widths, not whatever width the
+    # meta column ends up with below -- so its absolute on-page size stays exactly what
+    # company.logo_scale asks for, regardless of how much this column has to grow to also
+    # fit the date/author/attribution text sitting next to it.
+    content_w_in = footer_w_in - 3 * _FOOTER_GAP_IN
+
+    logo_w_in = logo_h_in = 0.0
+    if logo_path:
+        nominal_meta_w_in = column_widths[3] / sum(column_widths) * content_w_in
+        scale = company_cfg.get("logo_scale", 1.0)
+        logo_w_in = min(0.26 * scale, 1.0) * nominal_meta_w_in
+        logo_h_in = min(0.45 * scale, 1.0) * footer_h_in
+
+    meta_w_in = _text_block_width_in(lines, char_w_in, pad_in=0.08) + (logo_w_in + 0.08 if logo_path else 0.0)
+
+    needed_in = [legend_w_in, scale_w_in, crs_w_in, meta_w_in]
+    configured_in = [w / sum(column_widths) * content_w_in for w in column_widths]
+    final_widths = column_widths if all(c >= n - 1e-6 for c, n in zip(configured_in, needed_in)) else needed_in
+
+    # 7 columns, not 4 -- a dedicated fixed-width gap column sits between each pair of
+    # content columns (odd indices below), so there's always real reading space between
+    # them regardless of how tightly the content-based estimates above worked out.
+    ratios = [
+        final_widths[0], _FOOTER_GAP_IN, final_widths[1], _FOOTER_GAP_IN,
+        final_widths[2], _FOOTER_GAP_IN, final_widths[3],
+    ]
+    sub = gs_cell.subgridspec(1, 7, width_ratios=ratios, wspace=0)
+
+    # -- legend --------------------------------------------------------------
+    # All four footer columns bottom-align, sitting right on the page's bottom
+    # border with no empty strip beneath them; the map above absorbs whatever
+    # slack is left instead.
+    ax_legend = fig.add_subplot(sub[0])
+    ax_legend.axis("off")
+    if show_legend:
+        leg = ax_legend.legend(
+            handles=legend_handles, loc="lower left", bbox_to_anchor=(0.0, 0.0), frameon=False,
+            fontsize=fontsize, title=legend_title, title_fontsize=fontsize + 1,
+            borderaxespad=0, borderpad=_LEGEND_BORDERPAD, handletextpad=_LEGEND_HANDLETEXTPAD,
+            labelspacing=0.45, handlelength=_LEGEND_HANDLELENGTH,
+        )
+        leg.get_title().set_ha("left")
+
+    # -- scale bar -----------------------------------------------------------
+    ax_scale = fig.add_subplot(sub[2])
+    if show_scale:
+        draw_scalebar_panel(
+            fig, ax_scale, map_ax, crs, extent, length_fraction=sb_cfg.get("length_fraction", 0.7),
+            font_size=fontsize, units=sb_cfg.get("units", "auto"),
+        )
+    else:
+        ax_scale.axis("off")
+
+    # -- CRS label -----------------------------------------------------------
+    # Right-aligned (unlike the other footer text) so it sits right up against the fixed
+    # gap before the meta column instead of at the left of its own column, closer to the
+    # date/author block it reads alongside.
+    ax_crs = fig.add_subplot(sub[4])
+    ax_crs.axis("off")
+    ax_crs.set_xlim(0, 1)
+    ax_crs.set_ylim(0, 1)
+    if crs:
+        ax_crs.text(1.0, 0.0, f"Coordinate Reference System\n{crs}", transform=ax_crs.transAxes,
+                    ha="right", va="bottom", fontsize=fontsize, color=text_color, linespacing=1.6)
+
+    # -- date / author / attribution + logo -----------------------------------
+    ax_meta = fig.add_subplot(sub[6])
+    ax_meta.axis("off")
+    ax_meta.set_xlim(0, 1)
+    ax_meta.set_ylim(0, 1)
+
+    # Right-aligned immediately next to the logo (a small fixed gap between them) rather
+    # than left-aligned at the column's own left edge -- so the text+logo group sits
+    # together at the right of the column, using any leftover width (e.g. from this
+    # column being stretched to also fit next to the CRS/scalebar columns) as blank
+    # margin to their left instead of as a gap between the text and the logo.
+    text_x = 0.98
+    if logo_path:
+        img = plt.imread(str(logo_path))
+        # Logo anchors to the bottom-right corner rather than spanning/centering the full
+        # column height, so it doesn't compete with the top-aligned text. Converts the
+        # fixed logo_w_in/logo_h_in (computed above) back to a fraction of *this* axes'
+        # actual width/height, so its absolute size on the page matches that regardless of
+        # how this column was resized to fit the text next to it.
+        col_width_in = ax_meta.get_position().width * fig_w_in
+        col_height_in = ax_meta.get_position().height * fig_h_in
+        logo_w = min(logo_w_in / col_width_in, 1.0) if col_width_in else 0.0
+        logo_h = min(logo_h_in / col_height_in, 1.0) if col_height_in else 0.0
+        # logo_offset_in is in inches; converted to this column's own axes-fraction units
+        # since inset_axes below is positioned relative to ax_meta, not the full figure.
+        offset_in = company_cfg.get("logo_offset_in", 0.0)
+        offset_frac = offset_in / col_width_in if col_width_in else 0.0
+        logo_ax = ax_meta.inset_axes([1.0 - logo_w + offset_frac, 0.0, logo_w, logo_h])
+        logo_ax.imshow(img)
+        logo_ax.axis("off")
+        gap_frac = _LOGO_TEXT_GAP_IN / col_width_in if col_width_in else 0.0
+        text_x = 1.0 - logo_w + offset_frac - gap_frac
+
+    ax_meta.text(text_x, 0.0, "\n".join(lines), transform=ax_meta.transAxes, ha="right", va="bottom",
                  fontsize=fontsize, color=text_color, linespacing=1.6, wrap=True)
 
     return sub

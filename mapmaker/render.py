@@ -374,6 +374,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             basemap_interpolation=basemap_cfg.get("interpolation", "bilinear"),
             basemap_timeout=basemap_cfg.get("timeout", 15),
             min_bbox_frac=ins.get("min_bbox_frac", 0.05),
+            fixed_span_km=ins.get("fixed_span_km"),
         )
 
     _add_title(fig, cfg)
@@ -498,6 +499,12 @@ def build_turbine_map(cfg: dict) -> Path | list[Path]:
                 farm_cfg["export"]["filename"] = f"{stem}_{slug}{suffix}"
                 paths.append(build_turbine_map(farm_cfg))
             return paths
+        # Exactly one farm_name in the sheet -- no split needed, but still resolve it (rather
+        # than leaving farm_name None) so the single farm's own name drives the legend label
+        # below and a grid_cells map's reference-point lookup (data_io.read_wind_farm_point)
+        # can match it too.
+        if len(farm_names) == 1:
+            farm_name = farm_names[0]
 
     gdf = data_io.read_turbines(path, farm_name=farm_name)
     _warn_utm_zone_mismatch(cfg["map"]["crs"], gdf)
@@ -588,6 +595,11 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
                 farm_cfg["export"]["filename"] = f"{stem}_{slug}{suffix}"
                 paths.append(build_grid_map(farm_cfg))
             return paths
+        # Exactly one farm_name in the sheet -- no split needed, but still resolve it (rather
+        # than leaving farm_name None) so the reference-point lookup below
+        # (data_io.read_wind_farm_point) can match this farm against the wind_farms sheet.
+        if len(farm_names) == 1:
+            farm_name = farm_names[0]
 
     datasets = cfg["data"].get("selected_datasets")
     gdf = data_io.read_grid_cells(path, datasets=datasets, farm_name=farm_name)
@@ -613,20 +625,6 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
                                markeredgecolor="black", markersize=7,
                                label=legend_labels.get(dataset, f"{dataset} grid")))
 
-    # Optional per-cell labels: only if the sheet has a `label` column at all (most grid
-    # maps have far too many cells to label every one); within that column, a blank cell
-    # simply leaves that one point unlabeled -- e.g. label just the handful of cells you
-    # care to call out, and leave the rest empty.
-    if "label" in gdf.columns and style.get("label_points", True):
-        label_fontsize = style.get("label_fontsize", 7)
-        extent_for_labels = _compute_extent(gdf, cfg, target_aspect)
-        items = [
-            (row.geometry.x, row.geometry.y, str(row["label"]).strip())
-            for _, row in gdf.iterrows() if pd.notna(row.get("label")) and str(row["label"]).strip()
-        ]
-        _place_labels(fig, ax, extent_for_labels, items, label_fontsize, cfg.get("inset_map", {}),
-                      declutter=style.get("declutter_labels", True))
-
     # Optional single reference point (e.g. the wind farm this grid comparison is
     # centered on), folded into the extent so the map frame accounts for it even if it
     # sits near a grid edge. Its position/label are resolved by farm_name, in priority
@@ -639,9 +637,10 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
     #      there, so the common case needs no reference row and no config at all;
     #   3. otherwise `cfg["reference_point"]`'s own name/lon/lat, e.g. for a reference
     #      that isn't a portfolio farm, or a workbook with no farm_name column at all.
-    # `show`/`marker`/`color`/`size`/`label_fontsize` always come from config regardless
-    # of which source supplied the coordinates -- including `show`, so the reference point
-    # stays opt-in even once it can be found automatically.
+    # `show`/`marker`/`color`/`size` always come from config regardless of which source
+    # supplied the coordinates -- including `show`, so the reference point stays opt-in
+    # even once it can be found automatically. Its label font size isn't config-able on
+    # its own -- see the style.label_fontsize use below.
     ref = dict(cfg.get("reference_point", {}))
     matched_ref = data_io.read_grid_reference_point(path, farm_name) or data_io.read_wind_farm_point(path, farm_name)
     if matched_ref:
@@ -654,6 +653,7 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
     if show_ref and not matched_ref and farm_name and ref.get("name") and str(ref["name"]).strip().lower() != str(farm_name).strip().lower():
         show_ref = False
     extent_gdf = gdf
+    rx = ry = None
     if show_ref:
         ref_point = gpd.GeoSeries([Point(ref["lon"], ref["lat"])], crs="EPSG:4326").to_crs(cfg["map"]["crs"])
         rx, ry = ref_point.iloc[0].x, ref_point.iloc[0].y
@@ -661,15 +661,30 @@ def build_grid_map(cfg: dict) -> Path | list[Path]:
         ref_color = ref.get("color", "#d62728")
         ax.scatter([rx], [ry], s=ref.get("size", 70), marker=ref_marker, color=ref_color,
                    edgecolor="black", linewidth=0.7, zorder=8)
-        if ref.get("name"):
-            ax.annotate(
-                str(ref["name"]), (rx, ry), textcoords="offset points", xytext=(6, 4), ha="left",
-                fontsize=ref.get("label_fontsize", 9), color="0.05", zorder=9,
-                path_effects=[pe.withStroke(linewidth=2.2, foreground="white")],
-            )
         handles.append(Line2D([0], [0], marker=ref_marker, color="w", markerfacecolor=ref_color,
                                markeredgecolor="black", markersize=8, label=ref.get("name") or "Reference point"))
         extent_gdf = gpd.GeoDataFrame(geometry=pd.concat([gdf.geometry, ref_point], ignore_index=True), crs=gdf.crs)
+
+    # Per-cell labels (only if the sheet has a `label` column at all -- most grid maps
+    # have far too many cells to label every one; a blank cell leaves that one point
+    # unlabeled) plus the reference point's own label, placed together through a single
+    # `_place_labels` call -- previously the reference label was drawn separately at a
+    # fixed offset, so it could land right on top of a nearby cell label (e.g. a
+    # reference sitting next to a "c"/"e" cell); the reference goes first in `items` so
+    # it keeps first pick of the tidiest spot and cell labels declutter around it instead.
+    label_fontsize = style.get("label_fontsize", 7)
+    items = []
+    if show_ref and ref.get("name"):
+        items.append((rx, ry, str(ref["name"])))
+    if "label" in gdf.columns and style.get("label_points", True):
+        items.extend(
+            (row.geometry.x, row.geometry.y, str(row["label"]).strip())
+            for _, row in gdf.iterrows() if pd.notna(row.get("label")) and str(row["label"]).strip()
+        )
+    if items:
+        extent_for_labels = _compute_extent(extent_gdf, cfg, target_aspect)
+        _place_labels(fig, ax, extent_for_labels, items, label_fontsize, cfg.get("inset_map", {}),
+                      declutter=style.get("declutter_labels", True))
 
     # Per-dataset cell counts can be surfaced via extra_footer_lines (see
     # _finalize / elements.add_footer) or cfg["notes"] -- left out of the

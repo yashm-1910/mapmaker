@@ -58,6 +58,9 @@ DEFAULTS: dict[str, Any] = {
         # turn the logo off entirely rather than falling back to the bundled one.
         "logo_path": DEFAULT_LOGO_PATH,
         "logo_scale": 1.0,  # multiplier on the logo's base footer size, anchored bottom-right
+        # Content's right edge sits SIDE_PAD_IN (0.42in, see render.py) inside the page
+        # border; 0.3in pushes the logo most of the way there while leaving a small gap.
+        "logo_offset_in": 1.0,  # inches to nudge the logo right (+) / left (-) of its column edge
     },
     "map": {
         "crs": "EPSG:4326",
@@ -81,7 +84,7 @@ DEFAULTS: dict[str, Any] = {
         # tile resolution in each dimension). 0 = contextily's own auto choice.
         "zoom_adjust": 1,
         "alpha": 1.0,
-        "headers": {"User-Agent": "mapmaker-tuhh/1.0 (contact: replace-with-your-email)"},
+        "headers": {"User-Agent": "mapmaker/1.0"},
         # matplotlib's imshow resampling used when the (fixed-resolution) basemap tiles are
         # scaled up to the map panel's print size -- "bilinear" is the safe default; try
         # "lanczos" for crisper-looking tile text/lines (at the cost of possible ringing
@@ -132,6 +135,11 @@ DEFAULTS: dict[str, Any] = {
         "location": "lower left",
         "size": 0.28,
         "zoom_out_factor": 8,
+        # Fixed real-world width/height (km) for the inset, centered on the ROI -- overrides
+        # zoom_out_factor when set, so the inset always shows the same country-level context
+        # regardless of how large or small the actual data's extent is. None keeps the old
+        # relative (zoom_out_factor * ROI size) behavior.
+        "fixed_span_km": None,
         "bbox_edgecolor": "red",
         "bbox_linewidth": 2.2,
         "min_bbox_frac": 0.05,  # ROI box is floored to this fraction of the inset's width/height
@@ -148,12 +156,14 @@ DEFAULTS: dict[str, Any] = {
         "marker": "o",
         "color": "#d62728",
         "size": 70,
-        "label_fontsize": 9,
+        # No label_fontsize of its own -- always uses style.label_fontsize (see
+        # render.py::build_grid_map), so the reference point's label matches the grid
+        # cell labels' font size.
     },
     "footer": {
         "show": True,
         "height_fraction": 0.09,  # keep the footer band close to the bottom border
-        "column_widths": [1.0, 1.3, 1.4, 2.1],  # legend | scale bar | CRS | date-author-copyright+logo
+        "column_widths": [1.0, 1.7, 1.0, 2.1],  # legend | scale bar | CRS | date-author-copyright+logo
         "fontsize": 8,
         "text_color": "0.15",
     },
