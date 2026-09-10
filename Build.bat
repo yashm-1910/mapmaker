@@ -3,15 +3,28 @@ REM Double-click this file to build the standalone Windows app -- the no-termina
 REM way to turn this source checkout into something you can hand to someone who
 REM has no Python and no Conda on their machine.
 REM
-REM What it does, in order:
-REM   1. creates (or updates) the Conda environment defined by environment.yml
-REM   2. draws the .exe icon (packaging\make_icon.py)
-REM   3. runs PyInstaller against packaging/mapmaker.spec
+REM It builds and nothing else: it expects the `mapmaker` Conda environment to
+REM exist already, and stops with instructions if it does not. Setting the
+REM environment up is Setup.bat's job, and keeping one script responsible for
+REM that means building does not quietly reinstall packages underneath you.
 REM
-REM It uses the same `mapmaker` environment as Setup.bat and Mapmaker.bat -- one
-REM environment to create and keep in sync, and the .exe is necessarily built
-REM against the very libraries the tool is run and tested with. If you have
-REM already run Setup.bat, step 1 just adds the packaging tools to what is there.
+REM What it does, in order:
+REM   1. activates the existing `mapmaker` environment
+REM   2. draws the .exe icon, but only if packaging\build_assets\mapmaker.ico
+REM      is not already there -- the artwork does not change between builds
+REM   3. runs PyInstaller against packaging\mapmaker.spec
+REM
+REM Careful with parentheses in the echo lines below: every one of them sits
+REM inside an `if errorlevel 1 ( ... )` block, and cmd ends the block at the
+REM first unescaped `)` it sees -- including one in the middle of a message.
+REM That is a syntax error, and a syntax error kills the script outright, so a
+REM double-clicked window closes before reaching any `pause`. Write messages
+REM without parentheses rather than escaping them as ^( and ^).
+REM
+REM It uses the same `mapmaker` environment as Setup.bat and Mapmaker.bat, so the
+REM .exe is necessarily built against the very libraries the tool is run and
+REM tested with. The packaging tools come from environment.yml along with
+REM everything else; if PyInstaller is missing, re-run Setup.bat to pick it up.
 REM
 REM Everything comes from conda-forge; nothing here uses pip. The package itself
 REM is not installed at all -- PyInstaller reads it straight out of this folder,
@@ -38,20 +51,13 @@ if not defined CONDA_BASE (
     exit /b 1
 )
 
-REM env create fails if the env already exists, so update --prune instead when it
-REM does -- this keeps re-running this file after pulling changes a safe way to
-REM sync the environment, and is what adds the packaging tools to an environment
-REM that was originally created by Setup.bat.
-if exist "%CONDA_BASE%\envs\%MAPMAKER_CONDA_ENV%\" (
-    echo Updating existing Conda environment "%MAPMAKER_CONDA_ENV%"...
-    call conda env update -n "%MAPMAKER_CONDA_ENV%" -f environment.yml --prune
-) else (
-    echo Creating Conda environment "%MAPMAKER_CONDA_ENV%"...
-    call conda env create -n "%MAPMAKER_CONDA_ENV%" -f environment.yml
-)
-if errorlevel 1 (
+REM Building never creates or changes the environment -- that is Setup.bat's job.
+REM Checking for it here turns "the environment is missing" into one clear line
+REM rather than a confusing failure from conda activate further down.
+if not exist "%CONDA_BASE%\envs\%MAPMAKER_CONDA_ENV%\" (
     echo.
-    echo Could not create/update the Conda environment "%MAPMAKER_CONDA_ENV%".
+    echo The Conda environment "%MAPMAKER_CONDA_ENV%" was not found.
+    echo Run Setup.bat first to create it, then re-run this file.
     echo.
     pause
     exit /b 1
@@ -75,15 +81,20 @@ REM folder on the import path instead -- PyInstaller and its hooks import the
 REM package to work out what it needs.
 set "PYTHONPATH=%CD%"
 
-echo.
-echo Drawing the application icon...
-python packaging\make_icon.py
-if errorlevel 1 (
+REM The icon is generated artwork that only changes when make_icon.py changes, and
+REM it is not committed, so draw it once on a fresh checkout and leave it alone
+REM afterwards. Delete packaging\build_assets\mapmaker.ico to force a redraw.
+if not exist "packaging\build_assets\mapmaker.ico" (
     echo.
-    echo Could not draw the application icon (packaging\make_icon.py).
-    echo.
-    pause
-    exit /b 1
+    echo Drawing the application icon...
+    python packaging\make_icon.py
+    if errorlevel 1 (
+        echo.
+        echo Could not draw the application icon. See packaging\make_icon.py.
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 REM A stale dist\Mapmaker from an earlier build would keep files that are no
