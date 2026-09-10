@@ -14,3 +14,12 @@ dependencies:
   - pyproj 3.7.2
   - openpyxl 3.1.5
   - shapely 2.1.2
+  # Packaging tools, for Build.bat. Kept in this one file rather than a separate
+  # build environment so there is a single environment to create and keep in
+  # sync -- and so the .exe is necessarily built against the very same pinned
+  # libraries the tool is run and tested with.
+  # pyinstaller-hooks-contrib carries the maintained hooks for third-party
+  # packages (matplotlib, geopandas, pyproj, certifi); the few packages it has
+  # no hook for are covered by packaging/hooks/.
+  - pyinstaller >=6.11
+  - pyinstaller-hooks-contrib

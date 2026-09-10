@@ -42,13 +42,26 @@ On Windows, double-click `Mapmaker.bat` to open the desktop application.
 ## Build the standalone Windows app
 
 For handing Mapmaker to someone who has no Python and no Conda on their machine.
-Double-click `Build.bat` (or run it from a terminal); it creates the Conda
-environment defined by [environment-build.yml](environment-build.yml), builds the
-app, and checks that the result actually starts.
+Double-click `Build.bat` (or run it from a terminal); it creates or updates the
+same `mapmaker` environment used to run the tool, builds the app, and checks that
+the result actually starts.
 
 ```bash
 Build.bat
 ```
+
+Or, from an already-activated environment:
+
+```bash
+conda activate mapmaker
+set PYTHONPATH=%CD%
+python packaging\make_icon.py
+python -m PyInstaller packaging\mapmaker.spec --noconfirm --clean
+```
+
+`PYTHONPATH` is not optional there: the `mapmaker` package is never installed
+into the environment, so without it PyInstaller cannot import what it is being
+asked to bundle.
 
 The result is `dist\Mapmaker\` — copy that **whole folder** to the target machine
 and run `Mapmaker.exe` inside it. It contains:
