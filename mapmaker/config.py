@@ -109,6 +109,9 @@ DEFAULTS: dict[str, Any] = {
         "color": "0.35",
         "linewidth": 0.6,
         "frame": True,
+        # "line" -> plain thin black frame (default); "zebra" -> alternating black/white
+        # segments sized to the tick spacing, the classic topographic-map neatline.
+        "frame_style": "line",
     },
     # Legend now renders outside the map, in its own footer panel -- it never
     # overlaps map content regardless of how many entries it has.

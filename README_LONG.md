@@ -247,6 +247,7 @@ by every map type, but a setting a given map type doesn't use is simply ignored)
 | `graticule.color` | advanced | `0.35` | all | Tick/cross mark color. |
 | `graticule.linewidth` | advanced | `0.6` | all | Tick/cross mark line width. |
 | `graticule.frame` | advanced | `true` | all | Draw the black frame/spines around the map panel. |
+| `graticule.frame_style` | advanced | `line` | all | `line` draws a plain thin border; `zebra` draws the classic QGIS/cartographic alternating black/white border instead, with each segment sized to the grid's own tick spacing. No effect when `graticule.frame` is `false`. |
 
 ### `legend.*` / `scalebar.*` / `north_arrow.*` — chrome in the footer/map
 
@@ -449,6 +450,12 @@ example of every key above, each with its own description, and `mapmaker/config.
   to the shared `graticule.n_ticks`. Note the actual tick count is only
   approximate either way — spacing is rounded to a "nice" number (`elements.py::_nice_step`)
   rather than hit exactly.
+  - **`graticule.frame_style: zebra`** swaps the plain border for the alternating
+    black/white "zebra" frame classic to printed cartography, each segment sized to
+    match the grid's own tick spacing rather than a fixed length — so the striping
+    always lines up with the tick marks regardless of `n_ticks`/`n_ticks_x`/`n_ticks_y`
+    or map size. Purely decorative (`elements.py::_add_native_graticule`); has no effect
+    when `graticule.frame` is `false`.
 - **Projected/UTM coordinate systems work via `map.crs`** — it isn't limited to
   `EPSG:4326`. Set it to any CRS `pyproj` recognizes, e.g. `EPSG:32631` for UTM zone
   31N (covers the North Sea demo data); pick the zone that covers your own data's

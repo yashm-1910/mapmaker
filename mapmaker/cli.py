@@ -45,6 +45,7 @@ def main() -> None:
         )
 
     map_types = [args.map_type] if args.map_type else list(configs)
+    saved = 0
     for map_type in map_types:
         cfg = configs.get(map_type)
         if cfg is None:
@@ -59,6 +60,13 @@ def main() -> None:
         out = BUILDERS[map_type](cfg)
         for p in out if isinstance(out, list) else [out]:
             print(f"Saved: {p}")
+            saved += 1
+
+    # A closing line, so a run that has finished is visibly different from one still
+    # downloading tiles -- rendering can sit silently for a minute between "Saved:"
+    # lines, and without this the only signal that it's over is the shell prompt
+    # coming back. The count also catches the case where every map was skipped.
+    print(f"Done. {saved} map(s) generated.")
 
 
 if __name__ == "__main__":

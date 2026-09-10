@@ -7,6 +7,14 @@ import re
 import warnings
 from pathlib import Path
 
+import matplotlib
+# This tool only ever saves PNGs, never displays a figure -- forcing the non-interactive
+# Agg backend before pyplot is imported keeps it that way regardless of what else is
+# importable in the environment. Without this, matplotlib's automatic backend selection
+# picks whatever GUI toolkit it finds first (e.g. TkAgg, since mapmaker.gui imports
+# tkinter) and every render pops a live, blocking plot window instead of saving quietly.
+matplotlib.use("Agg")
+
 import contextily as cx
 import geopandas as gpd
 import matplotlib.patheffects as pe
@@ -354,6 +362,7 @@ def _finalize(fig, ax_map, cfg: dict, gdf_for_extent, footer_gs, target_aspect: 
             fontsize=grat.get("fontsize", 8), color=str(grat.get("color", "0.35")),
             linewidth=grat.get("linewidth", 0.6), frame=grat.get("frame", True),
             hemisphere=grat.get("hemisphere_labels", True),
+            frame_style=grat.get("frame_style", "line"),
         )
     else:
         ax_map.set_xticks([])

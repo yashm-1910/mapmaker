@@ -1,18 +1,27 @@
-"""PyInstaller entry script for the frozen Mapmaker.exe.
+"""PyInstaller entry point for the windowed Mapmaker.exe.
 
-A one-line wrapper rather than freezing mapmaker/gui.py directly: PyInstaller treats
-the entry script as a top-level module, so freezing gui.py itself would import it
-outside the `mapmaker` package it belongs to and break its own `from mapmaker import ...`
-lines. Importing through the package keeps the frozen app running exactly the same
-code path as `mapmaker-gui` does when pip-installed.
+Kept as a thin file of its own (rather than pointing PyInstaller straight at
+mapmaker/gui.py) so the frozen build has a stable, importable-free starting
+script: PyInstaller runs this as `__main__`, and everything it needs from the
+package is a normal import from there.
+
+The matching console executable is built from entry_cli.py -- see
+mapmaker.spec, which produces both from one shared bundle.
 """
+from __future__ import annotations
+
 import multiprocessing
 
-from mapmaker.gui import main
+
+def run() -> None:
+    # Not used by mapmaker itself, but joblib (pulled in by contextily) can start
+    # worker processes. Under a frozen build each worker re-launches this .exe, so
+    # without freeze_support() the workers would re-run the GUI instead of the work.
+    multiprocessing.freeze_support()
+
+    from mapmaker.gui import main
+    main()
+
 
 if __name__ == "__main__":
-    # Harmless here (nothing spawns processes today), but this must be the first thing
-    # a frozen Windows app calls if anything ever does -- without it, a child process
-    # re-runs the whole executable instead of the worker function.
-    multiprocessing.freeze_support()
-    main()
+    run()

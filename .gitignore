@@ -31,11 +31,12 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-# ...but packaging/mapmaker-gui.spec is hand-written source, not a generated artifact:
-# it carries the collect_all/exclude/onedir/no-UPX decisions the build depends on.
-!packaging/mapmaker-gui.spec
-# Generated from mapmaker/assets/logo.png at build time by packaging/build_exe.py.
-packaging/mapmaker.ico
+# ...but packaging/mapmaker.spec is hand-written source, not a generated artifact:
+# it carries the PROJ/GDAL data discovery, exclude list, onedir and no-UPX
+# decisions the build depends on.
+!packaging/mapmaker.spec
+# Generated from assets/logo.png at build time by packaging/make_icon.py.
+packaging/build_assets/
 
 # Installer logs
 pip-log.txt

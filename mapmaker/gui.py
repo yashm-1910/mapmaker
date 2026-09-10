@@ -60,6 +60,21 @@ def _save_last_workbook(path: str) -> None:
         pass  # a non-writable home directory just means "don't remember"; not worth surfacing
 
 
+def _cli_command(args: list[str]) -> list[str]:
+    """Build the command that runs one render in a separate process.
+
+    From a source checkout or a Conda install this is just this interpreter with
+    `-m mapmaker.cli`. In the packaged Windows build there is no interpreter to
+    call: sys.executable is Mapmaker.exe itself, and passing it `-m` would only
+    re-open the window. The build ships a console executable alongside it for
+    exactly this (see packaging/mapmaker.spec), sitting in the same folder.
+    """
+    if getattr(sys, "frozen", False):
+        cli = Path(sys.executable).with_name("Mapmaker-cli.exe" if sys.platform == "win32" else "Mapmaker-cli")
+        return [str(cli), *args]
+    return [sys.executable, "-m", "mapmaker.cli", *args]
+
+
 def _open_in_file_manager(path: Path) -> None:
     """Reveal `path` in the OS file manager (Explorer / Finder / xdg-open)."""
     if sys.platform == "win32":
@@ -207,7 +222,7 @@ class MapmakerApp:
                     continue
                 self.messages.put(("log", f"Drawing {label}…"))
                 proc = subprocess.run(
-                    [sys.executable, "-m", "mapmaker.cli", "--file", str(path), "--map-type", mt],
+                    _cli_command(["--file", str(path), "--map-type", mt]),
                     capture_output=True, text=True,
                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                 )

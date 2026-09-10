@@ -1,0 +1,49 @@
+# Windows version resource, embedded into both executables by mapmaker.spec.
+#
+# This is what fills in the Details tab of the .exe's file-properties dialog.
+# Worth keeping filled in: an unsigned executable with no publisher, description
+# or version at all is the profile SmartScreen and antivirus reputation systems
+# treat with the most suspicion, and it is also what tells a user who finds a
+# stray Mapmaker.exe on a shared drive what the thing actually is.
+#
+# It names the product rather than an organisation or an author on purpose, and
+# carries no copyright string. Nothing here needs to assert ownership, and a
+# name baked into every copy of an executable is a thing that goes stale and
+# gets shipped onward long after it stopped being right. Add a CompanyName and
+# LegalCopyright here if this is ever published under a particular banner.
+#
+# Keep the version numbers in step with mapmaker/__init__.py's __version__.
+# The four-part tuples must stay tuples of integers -- Windows requires that
+# shape even when the string version below is friendlier.
+
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(0, 1, 0, 0),
+    prodvers=(0, 1, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,      # Windows NT, 32-bit-compatible Windows subsystem
+    fileType=0x1,    # application
+    subtype=0x0,
+    date=(0, 0),
+  ),
+  kids=[
+    StringFileInfo(
+      [
+        StringTable(
+          '040904B0',  # US English, Unicode
+          [
+            StringStruct('CompanyName', 'Mapmaker'),
+            StringStruct('FileDescription', 'Mapmaker - map generator for wind energy datasets'),
+            StringStruct('FileVersion', '0.1.0'),
+            StringStruct('InternalName', 'Mapmaker'),
+            StringStruct('OriginalFilename', 'Mapmaker.exe'),
+            StringStruct('ProductName', 'Mapmaker'),
+            StringStruct('ProductVersion', '0.1.0'),
+          ],
+        )
+      ]
+    ),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])]),
+  ],
+)

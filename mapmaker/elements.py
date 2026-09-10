@@ -9,6 +9,7 @@ import contextily as cx
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Rectangle
+from matplotlib.transforms import blended_transform_factory
 from pyproj import CRS, Geod, Transformer
 
 from . import config as config_mod
@@ -65,9 +66,50 @@ def _is_geographic_crs(crs) -> bool:
         return "4326" in str(crs).upper()
 
 
+ZEBRA_BAND_IN = 0.035  # thickness of the zebra frame band, in inches -- equal on all four sides
+
+
+def _draw_zebra_frame(
+    ax, xs_sorted: list[float], ys_sorted: list[float],
+    xmin: float, xmax: float, ymin: float, ymax: float,
+) -> None:
+    """Alternating black/white segments around the map's inner frame, one segment per tick
+    interval (plus a partial segment from the extent edge to the first/last tick) -- the
+    classic topographic-map zebra neatline, sized to the graticule's own tick spacing rather
+    than a fixed length. Band thickness is computed in real inches (not axes-fraction) so it
+    comes out equal on all four sides regardless of the axes box's aspect ratio."""
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    fig_w_in, fig_h_in = ax.figure.get_size_inches()
+    box = ax.get_position()
+    band_x = ZEBRA_BAND_IN / (box.width * fig_w_in)   # fraction of axes width -- left/right bands
+    band_y = ZEBRA_BAND_IN / (box.height * fig_h_in)  # fraction of axes height -- top/bottom bands
+
+    def _edge(bounds: list[float], pos: float, thickness: float, horizontal: bool) -> None:
+        trans = (blended_transform_factory(ax.transData, ax.transAxes) if horizontal
+                 else blended_transform_factory(ax.transAxes, ax.transData))
+        for i in range(len(bounds) - 1):
+            a, b = bounds[i], bounds[i + 1]
+            color = "black" if i % 2 == 0 else "white"
+            xy = (a, pos) if horizontal else (pos, a)
+            wh = (b - a, thickness) if horizontal else (thickness, b - a)
+            ax.add_patch(Rectangle(
+                xy, *wh, transform=trans, facecolor=color, edgecolor="black",
+                linewidth=0.4, clip_on=False, zorder=6,
+            ))
+
+    x_bounds = sorted(set([xmin, xmax] + [x for x in xs_sorted if xmin <= x <= xmax]))
+    y_bounds = sorted(set([ymin, ymax] + [y for y in ys_sorted if ymin <= y <= ymax]))
+    _edge(x_bounds, 1 - band_y, band_y, horizontal=True)  # top
+    _edge(x_bounds, 0.0, band_y, horizontal=True)          # bottom
+    _edge(y_bounds, 0.0, band_x, horizontal=False)         # left
+    _edge(y_bounds, 1 - band_x, band_x, horizontal=False)  # right
+
+
 def _add_native_graticule(
     ax, extent: tuple[float, float, float, float], n_ticks_x: int, n_ticks_y: int,
-    fontsize: float, color: str, frame: bool,
+    fontsize: float, color: str, frame: bool, frame_style: str = "line",
 ) -> None:
     """Grid ticks in the map's own projected coordinate units (e.g. UTM meters/eastings
     and northings) instead of lon/lat -- a straight, rectilinear easting/northing grid,
@@ -93,9 +135,13 @@ def _add_native_graticule(
     ax.tick_params(colors="black", labelsize=fontsize, direction="out", length=4,
                     top=True, labeltop=True, right=True, labelright=True)
     if frame:
-        for spine in ax.spines.values():
-            spine.set_edgecolor("black")
-            spine.set_linewidth(0.9)
+        if frame_style == "zebra":
+            xmin, xmax, ymin, ymax = extent
+            _draw_zebra_frame(ax, xs_sorted, ys_sorted, xmin, xmax, ymin, ymax)
+        else:
+            for spine in ax.spines.values():
+                spine.set_edgecolor("black")
+                spine.set_linewidth(0.9)
     else:
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -115,6 +161,7 @@ def add_graticule(
     linestyle=None,
     frame: bool = True,
     hemisphere: bool = True,
+    frame_style: str = "line",
 ) -> None:
     """Draw small cross ticks at each graticule intersection, with coordinate labels
     mirrored on all four sides of the frame -- matching a classic QGIS print layout
@@ -128,7 +175,7 @@ def add_graticule(
     n_ticks_x = n_ticks if n_ticks_x is None else n_ticks_x
     n_ticks_y = n_ticks if n_ticks_y is None else n_ticks_y
     if not _is_geographic_crs(crs):
-        _add_native_graticule(ax, extent, n_ticks_x, n_ticks_y, fontsize, color, frame)
+        _add_native_graticule(ax, extent, n_ticks_x, n_ticks_y, fontsize, color, frame, frame_style)
         return
 
     xmin, xmax, ymin, ymax = extent
@@ -189,9 +236,12 @@ def add_graticule(
     ax.tick_params(colors="black", labelsize=fontsize, direction="out", length=4,
                     top=True, labeltop=True, right=True, labelright=True)
     if frame:
-        for spine in ax.spines.values():
-            spine.set_edgecolor("black")
-            spine.set_linewidth(0.9)
+        if frame_style == "zebra":
+            _draw_zebra_frame(ax, xs_sorted, ys_sorted, xmin, xmax, ymin, ymax)
+        else:
+            for spine in ax.spines.values():
+                spine.set_edgecolor("black")
+                spine.set_linewidth(0.9)
     else:
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -475,7 +525,7 @@ def add_footer(
     # as a string, not a bare float, and 0.15 is otherwise indistinguishable from any
     # other numeric setting when the sheet is parsed (see config.py::_parse_scalar).
     text_color = str(footer_cfg.get("text_color", "0.15"))
-    column_widths = footer_cfg.get("column_widths", [1.0, 1.3, 1.4, 2.1])
+    column_widths = footer_cfg.get("column_widths", [1.0, 2.0, 1.4, 2.1])
 
     show_legend = bool(legend_handles) and cfg.get("legend", {}).get("show", True)
     sb_cfg = cfg.get("scalebar", {})
@@ -519,11 +569,14 @@ def add_footer(
     # with (see draw_scalebar_panel's length_fraction/bar_frac clamp) -- this floor keeps
     # that column wide enough for its two segment labels to sit apart legibly instead of
     # crowding/overlapping each other.
-    scale_w_in = 1.6
+    scale_w_in = 2.0
 
+    # Title wrapped onto its own line (rather than "Coordinate Reference System" on one
+    # line) keeps this column's content-driven width narrower, so the CRS block sits
+    # closer to the date/author block and leaves the scale bar column more room to grow.
     crs_w_in = 0.35
     if crs:
-        crs_w_in = _text_block_width_in(["Coordinate Reference System", str(crs)], char_w_in)
+        crs_w_in = _text_block_width_in(["Coordinate Reference", f"System: {crs}"], char_w_in)
 
     # The logo is sized against the *configured* column_widths, not whatever width the
     # meta column ends up with below -- so its absolute on-page size stays exactly what
@@ -579,16 +632,15 @@ def add_footer(
         ax_scale.axis("off")
 
     # -- CRS label -----------------------------------------------------------
-    # Right-aligned (unlike the other footer text) so it sits right up against the fixed
-    # gap before the meta column instead of at the left of its own column, closer to the
-    # date/author block it reads alongside.
+    # Center-aligned within its (now narrower) column, which sits close to the
+    # date/author block it reads alongside while leaving the scale bar column more room.
     ax_crs = fig.add_subplot(sub[4])
     ax_crs.axis("off")
     ax_crs.set_xlim(0, 1)
     ax_crs.set_ylim(0, 1)
     if crs:
-        ax_crs.text(1.0, 0.0, f"Coordinate Reference System\n{crs}", transform=ax_crs.transAxes,
-                    ha="right", va="bottom", fontsize=fontsize, color=text_color, linespacing=1.6)
+        ax_crs.text(0.5, 0.0, f"Coordinate Reference\nSystem: {crs}", transform=ax_crs.transAxes,
+                    ha="center", va="bottom", fontsize=fontsize, color=text_color, linespacing=1.6)
 
     # -- date / author / attribution + logo -----------------------------------
     ax_meta = fig.add_subplot(sub[6])
